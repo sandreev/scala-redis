@@ -11,6 +11,8 @@ object ScalaRedisProject extends Build
     scalaVersion := "2.9.1",
     scalacOptions ++= Seq("-deprecation", "-unchecked")
   )
+ 
+  lazy val twitterRepo = "twitter.com" at "http://maven.twttr.com/"
 
   lazy val coreSettings = commonSettings ++ template ++ Seq(
     name := "RedisClient",
@@ -24,6 +26,7 @@ object ScalaRedisProject extends Build
       "com.twitter"    % "util"          % "1.11.4" % "test" intransitive(),
       "com.twitter"    % "finagle-core"  % "1.9.0" % "test"),
 
+    resolvers := Seq(twitterRepo),
     parallelExecution in Test := false,
     publishTo <<= version { (v: String) => 
       val nexus = "https://oss.sonatype.org/" 
