@@ -6,6 +6,7 @@ import org.scalatest.BeforeAndAfterAll
 import org.scalatest.matchers.ShouldMatchers
 import org.scalatest.junit.JUnitRunner
 import org.junit.runner.RunWith
+import com.redis.RedisClient.{DESC, SUM}
 
 
 @RunWith(classOf[JUnitRunner])
@@ -146,11 +147,36 @@ class SortedSetOperationsSpec extends Spec
   }
 
   describe("zrangebyscore") {
-    it ("should do a zrangebyscore (with scores)") {
+    it ("should return the elements between min and max") {
       add
-      zrangebyscore("hackers", 1940, true, 1960, true, None).get should equal (List ("alan kay", "richard stallman"))
 
-      zrangebyscoreWithScore("hackers", 1940, true, 1960, true, None).get should equal (List ( ("alan kay", 1940), ("richard stallman", 1953) ))
+      zrangebyscore("hackers", 1940, true, 1969, true, None).get should equal(
+        List("alan kay", "richard stallman", "yukihiro matsumoto", "linus torvalds"))
+
+      zrangebyscore("hackers", 1940, true, 1969, true, None, DESC).get should equal(
+        List("linus torvalds", "yukihiro matsumoto", "richard stallman","alan kay"))
     }
-  } 
+
+    it("should return the elements between min and max and allow offset and limit") {
+      add
+
+      zrangebyscore("hackers", 1940, true, 1969, true, Some(0, 2)).get should equal(
+        List("alan kay", "richard stallman"))
+
+      zrangebyscore("hackers", 1940, true, 1969, true, Some(0, 2), DESC).get should equal(
+        List("linus torvalds", "yukihiro matsumoto"))
+
+      zrangebyscore("hackers", 1940, true, 1969, true, Some(3, 1)).get should equal (
+        List("linus torvalds"))
+
+      zrangebyscore("hackers", 1940, true, 1969, true, Some(3, 1), DESC).get should equal (
+        List("alan kay"))
+
+      zrangebyscore("hackers", 1940, false, 1969, true, Some(0, 2)).get should equal (
+        List("richard stallman", "yukihiro matsumoto"))
+
+      zrangebyscore("hackers", 1940, true, 1969, false, Some(0, 2), DESC).get should equal (
+        List("yukihiro matsumoto", "richard stallman"))
+    }
+  }
 }
