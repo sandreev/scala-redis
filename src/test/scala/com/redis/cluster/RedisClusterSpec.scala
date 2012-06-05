@@ -6,15 +6,26 @@ import org.scalatest.BeforeAndAfterAll
 import org.scalatest.matchers.ShouldMatchers
 import org.scalatest.junit.JUnitRunner
 import org.junit.runner.RunWith
+import org.scalatest.mock.MockitoSugar
 
 
 @RunWith(classOf[JUnitRunner])
-class RedisClusterSpec extends Spec 
-                       with ShouldMatchers
-                       with BeforeAndAfterEach
-                       with BeforeAndAfterAll {
+class RedisClusterSpec extends Spec
+with ShouldMatchers
+with BeforeAndAfterEach
+with BeforeAndAfterAll
+with MockitoSugar {
 
-  val r = new RedisCluster("localhost:6379", "localhost:6380", "localhost:6381") {
+
+  import org.mockito.Mockito._
+
+  val conf = mock[ConfigManager]
+  when(conf.readConfig).thenReturn(
+    Map("1" -> NodeConfig("192.168.56.101", 6379),
+      "2" -> NodeConfig("192.168.56.101", 6380),
+      "3" -> NodeConfig("192.168.56.101", 6381)))
+
+  val r = new RedisCluster(conf) {
     val keyTag = Some(RegexKeyTag)
   }
 
@@ -29,7 +40,7 @@ class RedisClusterSpec extends Spec
       val l = List("debasish", "maulindu", "ramanendu", "nilanjan", "tarun", "tarun", "tarun")
 
       // last 3 should map to the same node
-      l.map(r.nodeForKey(_)).reverse.slice(0, 3).forall(_.toString == "localhost:6381") should equal(true)
+      l.map(r.nodeForKey(_)).reverse.slice(0, 3).toSet.size should equal(1)
 
       // set
       l foreach (s => r.nodeForKey(s).set(s, "working in anshin") should equal(true))
@@ -42,7 +53,7 @@ class RedisClusterSpec extends Spec
       val l = List("debasish", "maulindu", "ramanendu", "nilanjan", "tarun", "tarun", "tarun")
 
       // set
-      l foreach (s =>  r.nodeForKey(s).set(s, s + " is working in anshin") should equal(true))
+      l foreach (s => r.nodeForKey(s).set(s, s + " is working in anshin") should equal(true))
 
       r.get("debasish").get should equal("debasish is working in anshin")
       r.get("maulindu").get should equal("maulindu is working in anshin")
@@ -75,7 +86,7 @@ class RedisClusterSpec extends Spec
       r.mget(l.head, l.tail: _*).get.map(_.get.split(" ")(0)) should equal(l)
     }
 
-    it("list operations should work on the cluster"){
+    it("list operations should work on the cluster") {
       r.lpush("java-virtual-machine-langs", "java") should equal(Some(1))
       r.lpush("java-virtual-machine-langs", "jruby") should equal(Some(2))
       r.lpush("java-virtual-machine-langs", "groovy") should equal(Some(3))
@@ -83,7 +94,7 @@ class RedisClusterSpec extends Spec
       r.llen("java-virtual-machine-langs") should equal(Some(4))
     }
 
-    it("keytags should ensure mapping to the same server"){
+    it("keytags should ensure mapping to the same server") {
       r.lpush("java-virtual-machine-{langs}", "java") should equal(Some(1))
       r.lpush("java-virtual-machine-{langs}", "jruby") should equal(Some(2))
       r.lpush("java-virtual-machine-{langs}", "groovy") should equal(Some(3))
