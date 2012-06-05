@@ -18,11 +18,13 @@ object ScalaRedisProject extends Build
     name := "RedisClient",
 
     libraryDependencies ++= Seq("commons-pool" % "commons-pool" % "1.5.6",
+      "com.github.sgroschupf" % "zkclient" % "0.1",
       "org.slf4j"      % "slf4j-api"     % "1.6.1",
       "org.slf4j"      % "slf4j-log4j12" % "1.6.1"  % "provided",
       "log4j"          % "log4j"         % "1.2.16" % "provided",
       "junit"          % "junit"         % "4.8.1"  % "test",
       "org.scalatest"  % "scalatest_2.9.1" % "1.6.1" % "test",
+      "org.mockito"    % "mockito-all"   % "1.8.4"  % "test",
       "com.twitter"    % "util"          % "1.11.4" % "test" intransitive(),
       "com.twitter"    % "finagle-core"  % "1.9.0" % "test"),
 

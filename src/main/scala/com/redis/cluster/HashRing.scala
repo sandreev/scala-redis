@@ -1,45 +1,50 @@
 package com.redis.cluster
 
 import java.util.zip.CRC32
-import scala.collection.immutable.TreeSet
-import scala.collection.mutable.{ArrayBuffer, Map, ListBuffer}
+import collection.immutable.SortedMap
 
-case class HashRing[T](nodes: List[T], replicas: Int) {
-  var sortedKeys = new TreeSet[Long]
-  val cluster = new ArrayBuffer[T]
-  var ring = Map[Long, T]()
+class HashRing[T](val cluster: Map[String, T], val ring: SortedMap[Long, T], replicas: Int) {
 
-  nodes.foreach(addNode(_))
+  import HashRing._
 
   // adds a node to the hash ring (including a number of replicas)
-  def addNode(node: T) = {
-    cluster += node
-    (1 to replicas).foreach {replica =>
-      val key = calculateChecksum((node + ":" + replica).getBytes("UTF-8"))
-      ring += (key -> node)
-      sortedKeys = sortedKeys + key
+  def addNode(nodeName: String, node: T) = {
+    require(!cluster.contains(nodeName), "Cluster already contains node '" + nodeName + "'")
+    val pairs = (1 to replicas).map {
+      replica => (calculateChecksum((nodeName + ":" + replica).getBytes("UTF-8")), node)
     }
+    new HashRing[T](cluster + (nodeName -> node), ring ++ pairs, replicas)
   }
 
   // remove node from the ring
-  def removeNode(node: T) {
-    cluster -= node
-    (1 to replicas).foreach {replica =>
-      val key = calculateChecksum((node + ":" + replica).getBytes("UTF-8"))
-      ring -= key
-      sortedKeys = sortedKeys - key
+  def removeNode(nodeName: String) = {
+    require(cluster.contains(nodeName), "Cluster does not contain node '" + nodeName + "'")
+    val keys = (1 to replicas).map {
+      replica => calculateChecksum((nodeName + ":" + replica).getBytes("UTF-8"))
     }
+    new HashRing[T](cluster - nodeName, ring -- keys, replicas)
   }
 
   // get node for the key
   def getNode(key: Seq[Byte]): T = {
     val crc = calculateChecksum(key)
-    if (sortedKeys contains crc) ring(crc)
+    if (ring contains crc) ring(crc)
     else {
-      if (crc < sortedKeys.firstKey) ring(sortedKeys.firstKey)
-      else if (crc > sortedKeys.lastKey) ring(sortedKeys.lastKey)
-      else ring(sortedKeys.rangeImpl(None, Some(crc)).lastKey)
+      if (crc < ring.firstKey) ring.head._2
+      else if (crc > ring.lastKey) ring.last._2
+      else ring.rangeImpl(None, Some(crc)).last._2
     }
+  }
+}
+
+object HashRing {
+  def apply[T](nodes: Map[String, T], replicas: Int) = {
+    val pairs =
+      for ((nodeName, node) <- nodes.toSeq;
+           replica <- 1 to replicas) yield {
+        (calculateChecksum((nodeName + ":" + replica).getBytes("UTF-8")), node)
+      }
+    new HashRing[T](nodes, SortedMap(pairs: _*), replicas)
   }
 
   // Computes the CRC-32 of the given String
@@ -49,4 +54,3 @@ case class HashRing[T](nodes: List[T], replicas: Int) {
     checksum.getValue
   }
 }
-
