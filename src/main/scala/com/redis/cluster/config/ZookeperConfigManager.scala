@@ -1,12 +1,14 @@
 package com.redis.cluster.config
 
-import org.I0Itec.zkclient.serialize.ZkSerializer
-import org.I0Itec.zkclient.exception.ZkMarshallingError
 import org.I0Itec.zkclient.{IZkDataListener, ZkClient}
 import java.util.concurrent.{Callable, Executors, CopyOnWriteArrayList}
 import org.slf4j.LoggerFactory
 import java.util.StringTokenizer
 import com.redis.cluster.{ConfigManager, NodeConfig, ClusterConfigListener}
+
+object ZookeeperConfigManager {
+  val NODES_SEPARATOR = "|"
+}
 
 class ZookeperConfigManager(cfg: ZkConfig) extends ConfigManager {
 
@@ -20,7 +22,7 @@ class ZookeperConfigManager(cfg: ZkConfig) extends ConfigManager {
 
   val service = Executors.newSingleThreadExecutor()
 
-  private def parseCofig(data: String): Map[String, NodeConfig] = {
+  private def parseConfig(data: String): Map[String, NodeConfig] = {
 
     def parseEntry(entry: String): (String, NodeConfig) = {
       val nameHostPort = entry.split(":")
@@ -47,7 +49,7 @@ class ZookeperConfigManager(cfg: ZkConfig) extends ConfigManager {
     def handleDataChange(dataPath: String, data: Any) {
       service.submit(new Runnable {
         def run() {
-          val conf = parseCofig(data.toString)
+          val conf = parseConfig(data.toString)
           listeners.iterator.foreach {
             _.configUpdated(conf)
           }
@@ -61,7 +63,7 @@ class ZookeperConfigManager(cfg: ZkConfig) extends ConfigManager {
   }
 
   def readConfig = service.submit(new Callable[Map[String, NodeConfig]] {
-    def call() = parseCofig(zkClient.readData(zkNodesPath))
+    def call() = parseConfig(zkClient.readData(zkNodesPath))
   }).get
 
 
@@ -69,7 +71,7 @@ class ZookeperConfigManager(cfg: ZkConfig) extends ConfigManager {
     service.submit(new Runnable {
       def run() {
         ListenerComposite.listeners.add(listener)
-        val conf = parseCofig(zkClient.readData(zkNodesPath))
+        val conf = parseConfig(zkClient.readData(zkNodesPath))
         listener.configUpdated(conf)
       }
     })

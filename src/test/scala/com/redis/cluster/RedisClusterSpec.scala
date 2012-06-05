@@ -21,9 +21,9 @@ with MockitoSugar {
 
   val conf = mock[ConfigManager]
   when(conf.readConfig).thenReturn(
-    Map("1" -> NodeConfig("192.168.56.101", 6379),
-      "2" -> NodeConfig("192.168.56.101", 6380),
-      "3" -> NodeConfig("192.168.56.101", 6381)))
+    Map("1" -> NodeConfig("localhost", 6379),
+      "2" -> NodeConfig("localhost", 6380),
+      "3" -> NodeConfig("localhost", 6381)))
 
   val r = new RedisCluster(conf) {
     val keyTag = Some(RegexKeyTag)

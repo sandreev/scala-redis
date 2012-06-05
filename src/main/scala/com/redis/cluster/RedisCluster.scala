@@ -64,11 +64,6 @@ abstract class RedisCluster(configManager: ConfigManager) extends RedisCommand w
 
   val log = LoggerFactory.getLogger(getClass)
 
-
-  // not needed at cluster level
-  // override val host = null
-  // override val port = 0
-
   // abstract val
   val keyTag: Option[KeyTag]
 

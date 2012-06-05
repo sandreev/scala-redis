@@ -1,6 +1,6 @@
 package com.redis.cluster
 
-import config.{ZookeperConfigManager, ZKStringSerializer, ZkConfig}
+import config.{ZookeeperConfigManager, ZookeperConfigManager, ZKStringSerializer, ZkConfig}
 import java.util.Properties
 import org.I0Itec.zkclient.ZkClient
 import org.scalatest.matchers.ShouldMatchers
@@ -18,7 +18,7 @@ class RedisClusterUpdateSpec extends WordSpec with ShouldMatchers with BeforeAnd
   def setConfig(cfg: Map[String, NodeConfig]) {
     zkClient.createPersistent(zkConfig.zkNodesPath, true)
     zkClient.writeData(zkConfig.zkNodesPath, cfg.toSeq.map{ case (name, hostPort) => name + ":" + hostPort.host + ":" + hostPort.port}
-      .mkString("|")
+      .mkString(ZookeeperConfigManager.NODES_SEPARATOR)
     )
   }
 
