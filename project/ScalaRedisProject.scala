@@ -1,5 +1,6 @@
 import sbt._
 import Keys._
+import sbtassembly.Plugin.AssemblyKeys._
 
 object ScalaRedisProject extends Build
 {
@@ -7,7 +8,7 @@ object ScalaRedisProject extends Build
 
   lazy val commonSettings: Seq[Setting[_]] = Seq(
     organization := "net.debasishg",
-    version := "2.5",
+    version := "2.6",
     scalaVersion := "2.9.1",
     scalacOptions ++= Seq("-deprecation", "-unchecked")
   )
@@ -60,7 +61,7 @@ object ScalaRedisProject extends Build
         </developer>
       </developers>),
     unmanagedResources in Compile <+= baseDirectory map { _ / "LICENSE" }
-  )
+  ) ++ sbtassembly.Plugin.assemblySettings ++ Seq(test in assembly := {})
 
   lazy val fmpp = TaskKey[Seq[File]]("fmpp")
   lazy val fmppOptions = SettingKey[Seq[String]]("fmpp-options")
