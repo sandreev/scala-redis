@@ -85,7 +85,11 @@ trait IO extends Log {
     while (delimiter != Nil) {
       val next = try {
         in.read
-      } catch {case e => -1}
+      } catch {
+        case e =>
+          error("Readline error " + e.getMessage, e)
+          -1
+      }
       if (next < 0) return null
       if (next == delimiter.head) {
         found ::= delimiter.head
