@@ -23,9 +23,9 @@ class RedisClusterUpdateSpec extends WordSpec with ShouldMatchers with BeforeAnd
   }
 
   override protected def beforeAll() {
-    setConfig(Map("1" -> NodeConfig("192.168.56.101", 6379),
-      "2" -> NodeConfig("192.168.56.101", 6380),
-      "3" -> NodeConfig("192.168.56.101", 6381)))
+    setConfig(Map("1" -> NodeConfig("localhost", 6379),
+      "2" -> NodeConfig("localhost", 6380),
+      "3" -> NodeConfig("localhost", 6381)))
   }
 
   "cluster" should {
@@ -34,16 +34,16 @@ class RedisClusterUpdateSpec extends WordSpec with ShouldMatchers with BeforeAnd
         val keyTag = Some(RegexKeyTag)
       }
 
-      setConfig(Map("1" -> NodeConfig("192.168.56.101", 6379),
-        "2" -> NodeConfig("192.168.56.101", 6380),
-        "3" -> NodeConfig("192.168.56.101", 6382)))
+      setConfig(Map("1" -> NodeConfig("localhost", 6379),
+        "2" -> NodeConfig("localhost", 6380),
+        "3" -> NodeConfig("localhost", 6382)))
 
       Thread.sleep(3000)
 
       var clients = Set.empty[String]
       cluster.onAllConns( clients += _.toString )
 
-      clients should be(Set("192.168.56.101:6379", "192.168.56.101:6380", "192.168.56.101:6382"))
+      clients should be(Set("localhost:6379", "localhost:6380", "localhost:6382"))
     }
   }
 
