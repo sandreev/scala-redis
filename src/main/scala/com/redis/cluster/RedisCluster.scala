@@ -189,6 +189,8 @@ abstract class RedisCluster(configManager: ConfigManager) extends RedisCommand w
 
   override def expire(key: Any, expiry: Int)(implicit format: Format) = nodeForKey(key).expire(key, expiry)
 
+  override def expireAt(key: Any, expireAt: Int)(implicit format: Format) = nodeForKey(key).expireAt(key, expireAt)
+
   override def select(index: Int) = throw new UnsupportedOperationException("not supported on a cluster")
 
   /**

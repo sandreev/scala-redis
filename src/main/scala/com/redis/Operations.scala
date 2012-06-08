@@ -49,6 +49,11 @@ trait Operations { self: Redis =>
   def expire(key: Any, expiry: Int)(implicit format: Format): Boolean =
     send("EXPIRE", List(key, expiry))(asBoolean)
 
+  // EXPIREAT (key, expireAt)
+  // sets the time as Unix timestamp in seconds to represent when the key should expire
+  def expireAt(key: Any, expireAt: Int)(implicit format: Format): Boolean =
+    send("EXPIREAT", List(key,expireAt))(asBoolean)
+
   // SELECT (index)
   // selects the DB to connect, defaults to 0 (zero).
   def select(index: Int): Boolean =
