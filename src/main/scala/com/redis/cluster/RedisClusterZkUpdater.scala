@@ -23,8 +23,8 @@ object RedisClusterZkUpdater {
     val nodeData = nodesMapping.mkString(ZookeeperConfigManager.NODES_SEPARATOR)
 
     if (!zkClient.exists(redisNodesPath)) {
-      zkClient.createPersistent("/rediscluster")
-      zkClient.createPersistent(redisNodesPath, nodeData)
+      zkClient.createPersistent(redisNodesPath, true)
+      zkClient.writeData(redisNodesPath, nodeData)
       println("Created redis nodes record in zookeeper and loaded it with data")
     } else {
       zkClient.writeData(redisNodesPath, nodeData)
