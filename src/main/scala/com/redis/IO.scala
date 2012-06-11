@@ -15,7 +15,12 @@ trait IO extends Log {
   var db: Int = _
 
   def connected = {
-    socket != null
+    socket != null &&
+    socket.isBound() &&
+    !socket.isClosed() &&
+    socket.isConnected() &&
+    !socket.isInputShutdown() &&
+    !socket.isOutputShutdown()
   }
   def reconnect = {
     disconnect && connect
@@ -28,6 +33,9 @@ trait IO extends Log {
       socket.setSoTimeout(0)
       socket.setKeepAlive(true)
       socket.setTcpNoDelay(true)
+      socket.setReuseAddress(true)
+      socket.setSoLinger(true,0)  //Control calls close () method, the underlying socket is closed immediately
+
       out = socket.getOutputStream
       in = new BufferedInputStream(socket.getInputStream)
       true

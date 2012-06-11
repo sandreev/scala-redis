@@ -397,4 +397,6 @@ abstract class RedisCluster(configManager: ConfigManager) extends RedisCommand w
   override def hvals[A](key: Any)(implicit format: Format, parse: Parse[A]) = nodeForKey(key).hvals[A](key)
 
   override def hgetall[K, V](key: Any)(implicit format: Format, parseK: Parse[K], parseV: Parse[V]) = nodeForKey(key).hgetall[K, V](key)
+
+  override def hsetnx(key: Any, field: Any, value: Any)(implicit format: Format): Boolean = nodeForKey(key).hsetnx(key, field, value)
 }
