@@ -16,10 +16,12 @@ object RedisClient {
 trait Redis extends IO with Protocol {
   def send[A](command: String, args: Seq[Any])(result: => A)(implicit format: Format): A = {
     write(Commands.multiBulk(command.getBytes("UTF-8") +: (args map (format.apply))))
+    flush()
     result
   }
   def send[A](command: String)(result: => A): A = {
     write(Commands.multiBulk(List(command.getBytes("UTF-8"))))
+    flush()
     result
   }
   def cmd(args: Seq[Array[Byte]]) = Commands.multiBulk(args)
@@ -46,12 +48,12 @@ class RedisClient(override val host: String, override val port: Int)
   def this() = this("localhost", 6379)
   override def toString = host + ":" + String.valueOf(port)
 
-  def pipeline(f: PipelineClient => Any): Option[List[Any]] = {
+  def multi(f: MultiClient => Any): Option[List[Any]] = {
     send("MULTI")(asString) // flush reply stream
     try {
-      val pipelineClient = new PipelineClient(this)
-      f(pipelineClient)
-      send("EXEC")(asExec(pipelineClient.handlers))
+      val multiClient = new MultiClient(this)
+      f(multiClient)
+      send("EXEC")(asExec(multiClient.handlers))
     } catch {
       case e: RedisMultiExecException => 
         send("DISCARD")(asString)
@@ -59,7 +61,19 @@ class RedisClient(override val host: String, override val port: Int)
     }
   }
 
-  class PipelineClient(parent: RedisClient) extends RedisCommand {
+  def pipeline(f: RedisCommand => Any): Option[List[Any]] = {
+    try {
+      val pipelineClient = new PipelineClient(this)
+      f(pipelineClient)
+
+      pipelineClient.flush()
+      Some(pipelineClient.handlers.map(_()).toList)
+    } catch {
+      case e: RedisConnectionException => None
+    }
+  }
+
+  class MultiClient(parent: RedisClient) extends RedisCommand {
     import serialization.Parse
 
     var handlers: Vector[() => Any] = Vector.empty
@@ -67,12 +81,14 @@ class RedisClient(override val host: String, override val port: Int)
     override def send[A](command: String, args: Seq[Any])(result: => A)(implicit format: Format): A = {
       write(Commands.multiBulk(command.getBytes("UTF-8") +: (args map (format.apply))))
       handlers :+= (() => result)
+      flush()
       receive(singleLineReply).map(Parse.parseDefault)
       null.asInstanceOf[A] // ugh... gotta find a better way
     }
     override def send[A](command: String)(result: => A): A = {
       write(Commands.multiBulk(List(command.getBytes("UTF-8"))))
       handlers :+= (() => result)
+      flush()
       receive(singleLineReply).map(Parse.parseDefault)
       null.asInstanceOf[A]
     }
@@ -87,7 +103,42 @@ class RedisClient(override val host: String, override val port: Int)
     override def disconnect = parent.disconnect
     override def clearFd = parent.clearFd
     override def write(data: Array[Byte]) = parent.write(data)
+
+    override def flush() {
+      parent.flush()
+    }
+
     override def readLine = parent.readLine
     override def readCounted(count: Int) = parent.readCounted(count)
+  }
+
+  class PipelineClient(parent: RedisClient) extends RedisCommand {
+    var handlers: Vector[() => Any] = Vector.empty
+
+    override def send[A](command: String, args: Seq[Any])(result: => A)(implicit format: Format): A = {
+      write(Commands.multiBulk(command.getBytes("UTF-8") +: (args map (format.apply))))
+      handlers :+= (() => result)
+      null.asInstanceOf[A] // ugh... gotta find a better way
+    }
+    override def send[A](command: String)(result: => A): A = {
+      write(Commands.multiBulk(List(command.getBytes("UTF-8"))))
+      handlers :+= (() => result)
+      null.asInstanceOf[A]
+    }
+
+    val host = parent.host
+    val port = parent.port
+
+    // TODO: Find a better abstraction
+    override def connected = parent.connected
+    override def connect = parent.connect
+    override def reconnect = parent.reconnect
+    override def disconnect = parent.disconnect
+    override def clearFd = parent.clearFd
+    override def write(data: Array[Byte]) = parent.write(data)
+    override def readLine = parent.readLine
+    override def flush() {parent.flush()}
+    override def readCounted(count: Int) = parent.readCounted(count)
+
   }
 }

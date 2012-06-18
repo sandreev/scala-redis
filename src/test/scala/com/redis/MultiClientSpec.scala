@@ -9,7 +9,7 @@ import org.junit.runner.RunWith
 
 
 @RunWith(classOf[JUnitRunner])
-class PipelineSpec extends Spec 
+class MultiClientSpec extends Spec
                    with ShouldMatchers
                    with BeforeAndAfterEach
                    with BeforeAndAfterAll {
@@ -27,9 +27,9 @@ class PipelineSpec extends Spec
     r.disconnect
   }
 
-  describe("pipeline1") {
-    it("should do pipelined commands") {
-      r.pipeline { p =>
+  describe("multi1") {
+    it("should do multid commands") {
+      r.multi { p =>
         p.set("key", "debasish")
         p.get("key")
         p.get("key1")
@@ -37,9 +37,9 @@ class PipelineSpec extends Spec
     }
   }
 
-  describe("pipeline2") {
-    it("should do pipelined commands") {
-      r.pipeline { p =>
+  describe("multi2") {
+    it("should do multid commands") {
+      r.multi { p =>
         p.lpush("country_list", "france")
         p.lpush("country_list", "italy")
         p.lpush("country_list", "germany")
@@ -49,11 +49,11 @@ class PipelineSpec extends Spec
     }
   }
 
-  describe("pipeline3") {
-    it("should handle errors properly in pipelined commands") {
+  describe("multi3") {
+    it("should handle errors properly in multid commands") {
       val thrown = 
         evaluating {
-          r.pipeline { p =>
+          r.multi { p =>
             p.set("a", "abc")
             p.lpop("a")
           }
@@ -63,9 +63,9 @@ class PipelineSpec extends Spec
     }
   }
 
-  describe("pipeline4") {
-    it("should discard pipelined commands") {
-      r.pipeline { p =>
+  describe("multi4") {
+    it("should discard multid commands") {
+      r.multi { p =>
         p.set("a", "abc")
         throw new RedisMultiExecException("want to discard")
       } should equal(None)
