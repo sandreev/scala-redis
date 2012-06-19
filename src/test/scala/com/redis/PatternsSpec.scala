@@ -17,7 +17,8 @@ class PatternsSpec extends Spec
 
   implicit val clients = new RedisClientPool("localhost", 6379)
 
-  override def beforeEach = {
+  override def beforeEach = clients.withClient{
+    client => client.flushdb
   }
 
   override def afterEach = clients.withClient{
