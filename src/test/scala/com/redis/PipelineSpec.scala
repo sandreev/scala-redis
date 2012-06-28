@@ -36,7 +36,7 @@ with BeforeAndAfterAll {
           p.set("key", "debasish")
           p.get("key")
           p.get("key1")
-      }._1 should equal(results(true, Some("debasish"), None))
+      }.right.get should equal(Right(true) :: Right(Some("debasish")) :: Right(None) :: Nil)
     }
   }
 
@@ -49,7 +49,7 @@ with BeforeAndAfterAll {
           p.lpush("country_list", "germany")
           p.incrby("country_count", 3)
           p.lrange("country_list", 0, -1)
-      }._1 should equal(results(Some(1), Some(2), Some(3), Some(3), Some(List(Some("germany"), Some("italy"), Some("france")))))
+      }.right.get should equal(List(Right(Some(1)), Right(Some(2)), Right(Some(3)), Right(Some(3)), Right(Some(List(Some("germany"), Some("italy"), Some("france"))))))
     }
   }
 
@@ -62,9 +62,9 @@ with BeforeAndAfterAll {
           p.lpop("a")
       }
 
-      res._1.head should equal(Success(true))
-      res._1.tail.head.isInstanceOf[ExecError] should equal(true)
-      res._2.isEmpty should equal(true)
+      res.right.get.head should equal(Right(true))
+      res.right.get.tail.head.isInstanceOf[Left[Exception, Any]] should equal(true)
+      res.left.toOption.isEmpty should equal(true)
 
       r.get("a").get should equal("abc")
     }
@@ -78,8 +78,8 @@ with BeforeAndAfterAll {
           throw new Exception("want to discard")
       }
 
-      res._1 should equal(results(true))
-      res._2.get.isInstanceOf[Exception] should equal(true)
+      res.right.get should equal(List(Right(true)))
+      res.left.toOption.isEmpty should equal(true)
 
       r.get("a") should equal(Some("abc"))
     }
@@ -93,8 +93,8 @@ with BeforeAndAfterAll {
           throw new RedisConnectionException("want to discard")
       }
 
-      res._1.isEmpty should equal(true)
-      res._2.get.isInstanceOf[RedisConnectionException] should equal(true)
+      res.right.toOption.isEmpty should equal(true)
+      res.left.get.isInstanceOf[RedisConnectionException] should equal(true)
     }
   }
 

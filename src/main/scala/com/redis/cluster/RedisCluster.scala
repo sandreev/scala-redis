@@ -212,7 +212,7 @@ abstract class RedisCluster(configManager: ConfigManager)
 
     def onAllConns[T](body: (RedisClient) => T) = throw new UnsupportedOperationException("Unsupported for cluster pipelineNode")
 
-    def flushAndGetResults(): List[AsyncResult[Any]] = pipe match {
+    def flushAndGetResults(): List[Either[Exception, Any]] = pipe match {
       case Some(redisPipe) =>
         try {
           redisPipe.flushAndGetResults()
@@ -225,18 +225,17 @@ abstract class RedisCluster(configManager: ConfigManager)
 
   def pipeline(f: RedisCommand => Any) = {
     val pipe = new SingleNodePipeline(this)
-    var error: Option[_ <: Exception] = None
 
-    try {
+    val ex = try {
       f(pipe)
+      None
     } catch {
-      case e: Exception => error = Some(e)
+      case e: Exception => Some(e)
     }
 
-    error match {
-      case Some(RedisConnectionException(_)) => (Nil, error)
-      case _ => (pipe.flushAndGetResults(), error)
+    ex match {
+      case Some(e @ RedisConnectionException(_)) => Left(e)
+      case _ => Right(pipe.flushAndGetResults())
     }
-
   }
 }

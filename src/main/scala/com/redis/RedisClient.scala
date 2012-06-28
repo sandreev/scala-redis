@@ -50,7 +50,7 @@ with HashOperations
 
 
 trait Pipeline {
-  def pipeline(f: RedisCommand => Any): (List[AsyncResult[Any]], Option[Exception])
+  def pipeline(f: RedisCommand => Any): Either[Exception, List[Either[Exception, Any]]]
 }
 
 class RedisClient(override val host: String, override val port: Int)
@@ -77,21 +77,20 @@ class RedisClient(override val host: String, override val port: Int)
     }
   }
 
-  def pipeline(f: RedisCommand => Any): (List[AsyncResult[Any]], Option[Exception]) = {
-    var error: Option[_ <: Exception] = None
+  def pipeline(f: RedisCommand => Any): Either[Exception, List[Either[Exception, Any]]] = {
     val pipe = pipelineBuffer
 
-    try {
+    val ex = try {
       f(pipe)
+      None
     } catch {
-      case e: Exception => error = Some(e)
+      case e: Exception => Some(e)
     }
 
-    error match {
-      case Some(RedisConnectionException(_)) => (Nil, error)
-      case _ => (pipe.flushAndGetResults(), error)
+    ex match {
+      case Some(e @ RedisConnectionException(_)) => Left(e)
+      case _ => Right(pipe.flushAndGetResults())
     }
-
   }
 
   private[redis] def pipelineBuffer = new PipelineBuffer(this)
@@ -149,18 +148,14 @@ class RedisClient(override val host: String, override val port: Int)
 class PipelineBuffer(parent: RedisClient) extends RedisCommand {
   var handlers: Vector[() => Any] = Vector.empty
 
-  private[redis] def flushAndGetResults(): List[AsyncResult[Any]] = {
+  private[redis] def flushAndGetResults(): List[Either[Exception, Any]] = {
     flush()
-    var connectionError: Option[RedisConnectionException] = None
-    val results = for (h <- handlers if connectionError.isEmpty) yield {
+    val results = for (h <- handlers) yield {
       try {
-        Success(h())
+        Right(h())
       } catch {
-        case e: RedisConnectionException =>
-          connectionError = Some(e)
-          ExecError(e)
         case e: Exception =>
-          ExecError(e)
+          Left(e)
       }
     }
     results.toList

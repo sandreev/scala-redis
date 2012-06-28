@@ -42,7 +42,7 @@ with MockitoSugar {
           p.set("key", "debasish")
           p.get("key")
           p.get("key")
-      }._1 should equal(results(true, Some("debasish"), Some("debasish")))
+      }.right.get should equal(List(Right(true), Right(Some("debasish")), Right(Some("debasish"))))
     }
   }
 
@@ -54,7 +54,7 @@ with MockitoSugar {
           p.lpush("country_list", "italy")
           p.lpush("country_list", "germany")
           p.lrange("country_list", 0, -1)
-      }._1 should equal(results(Some(1), Some(2), Some(3), Some(List(Some("germany"), Some("italy"), Some("france")))))
+      }.right.get should equal(List(Right(Some(1)), Right(Some(2)), Right(Some(3)), Right(Some(List(Some("germany"), Some("italy"), Some("france"))))))
     }
   }
 
@@ -67,9 +67,9 @@ with MockitoSugar {
           p.lpop("a")
       }
 
-      res._1.head should equal(Success(true))
-      res._1.tail.head.isInstanceOf[ExecError] should equal(true)
-      res._2.isEmpty should equal(true)
+      res.right.get.head should equal(Right(true))
+      res.right.get.tail.head.isInstanceOf[Left[Exception, Any]] should equal(true)
+      res.left.toOption.isEmpty should equal(true)
 
       r.get("a").get should equal("abc")
     }
@@ -83,8 +83,8 @@ with MockitoSugar {
           throw new Exception("want to discard")
       }
 
-      res._1 should equal(results(true))
-      res._2.get.isInstanceOf[Exception] should equal(true)
+      res.right.get should equal(List(Right(true)))
+      res.left.toOption.isEmpty should equal(true)
 
       r.get("a") should equal(Some("abc"))
     }
@@ -98,8 +98,8 @@ with MockitoSugar {
           throw new RedisConnectionException("want to discard")
       }
 
-      res._1.isEmpty should equal(true)
-      res._2.get.isInstanceOf[RedisConnectionException] should equal(true)
+      res.right.toOption.isEmpty should equal(true)
+      res.left.get.isInstanceOf[RedisConnectionException] should equal(true)
     }
   }
 
@@ -111,8 +111,7 @@ with MockitoSugar {
             p.set(i, i+1)
       }
 
-      (res._1.size < 100) should equal(true)
-      (res._2.isEmpty) should equal(false)
+      (res.right.get.size < 100) should equal(true)
     }
   }
 
