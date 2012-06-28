@@ -8,7 +8,7 @@ object ScalaRedisProject extends Build
 
   lazy val commonSettings: Seq[Setting[_]] = Seq(
     organization := "net.debasishg",
-    version := "2.6",
+    version := "2.6.3",
     scalaVersion := "2.9.1",
     scalacOptions ++= Seq("-deprecation", "-unchecked")
   )
@@ -32,9 +32,9 @@ object ScalaRedisProject extends Build
     resolvers := Seq(twitterRepo),
     parallelExecution in Test := false,
     publishTo <<= version { (v: String) => 
-      val nexus = "https://oss.sonatype.org/" 
-      if (v.trim.endsWith("SNAPSHOT")) Some("snapshots" at nexus + "content/repositories/snapshots")
-      else Some("releases" at nexus + "service/local/staging/deploy/maven2") 
+      val jetlore = "http://repo.qwhisper.com/"
+      if (v.trim.endsWith("SNAPSHOT")) Some(Resolver.sftp("Jetlore SSH", "qbeast", "/data/repo/snapshots") as("qwhisper"))
+      else Some(Resolver.sftp("Jetlore SSH", "qbeast", "/data/repo/releases") as("qwhisper"))
     },
     credentials += Credentials(Path.userHome / ".ivy2" / ".credentials"),
     publishMavenStyle := true,
