@@ -1,31 +1,37 @@
-package com.redis
+package com.redis.cluster
 
-import org.scalatest.Spec
-import org.scalatest.BeforeAndAfterEach
-import org.scalatest.BeforeAndAfterAll
-import org.scalatest.matchers.ShouldMatchers
-import org.scalatest.junit.JUnitRunner
 import org.junit.runner.RunWith
-
+import org.scalatest.junit.JUnitRunner
+import org.scalatest.{BeforeAndAfterAll, BeforeAndAfterEach, Spec}
+import org.scalatest.matchers.ShouldMatchers
+import org.scalatest.mock.MockitoSugar
+import com.redis.{ExecError, RedisConnectionException, Success}
 
 @RunWith(classOf[JUnitRunner])
-class PipelineSpec extends Spec
+class ClusterPipelineSpec extends Spec
 with ShouldMatchers
 with BeforeAndAfterEach
-with BeforeAndAfterAll {
+with BeforeAndAfterAll
+with MockitoSugar {
 
-  val r = new RedisClient("localhost", 6379)
 
-  override def beforeEach = {
+  import org.mockito.Mockito._
+
+  val conf = mock[ConfigManager]
+  when(conf.readConfig).thenReturn(
+    Map("1" -> NodeConfig("localhost", 6379),
+      "2" -> NodeConfig("localhost", 6380),
+      "3" -> NodeConfig("localhost", 6381)))
+
+  val r = new RedisCluster(conf) {
+    val keyTag = Some(RegexKeyTag)
   }
 
-  override def afterEach = {
-    r.flushdb
-  }
+  override def beforeEach = {}
 
-  override def afterAll = {
-    r.disconnect
-  }
+  override def afterEach = r.flushdb
+
+  override def afterAll = r.close
 
   def results(v: Any*) = v.map(Success(_)).toList
 
@@ -35,8 +41,8 @@ with BeforeAndAfterAll {
         p =>
           p.set("key", "debasish")
           p.get("key")
-          p.get("key1")
-      }._1 should equal(results(true, Some("debasish"), None))
+          p.get("key")
+      }._1 should equal(results(true, Some("debasish"), Some("debasish")))
     }
   }
 
@@ -47,9 +53,8 @@ with BeforeAndAfterAll {
           p.lpush("country_list", "france")
           p.lpush("country_list", "italy")
           p.lpush("country_list", "germany")
-          p.incrby("country_count", 3)
           p.lrange("country_list", 0, -1)
-      }._1 should equal(results(Some(1), Some(2), Some(3), Some(3), Some(List(Some("germany"), Some("italy"), Some("france")))))
+      }._1 should equal(results(Some(1), Some(2), Some(3), Some(List(Some("germany"), Some("italy"), Some("france")))))
     }
   }
 
@@ -97,5 +102,20 @@ with BeforeAndAfterAll {
       res._2.get.isInstanceOf[RedisConnectionException] should equal(true)
     }
   }
+
+  describe("pipeline5") {
+    it("should prohibit commands with keys mapping to different nodes") {
+      val res = r.pipeline {
+        p =>
+          for (i <- 1 to 100)
+            p.set(i, i+1)
+      }
+
+      (res._1.size < 100) should equal(true)
+      (res._2.isEmpty) should equal(false)
+    }
+  }
+
+
 
 }

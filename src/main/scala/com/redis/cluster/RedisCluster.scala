@@ -1,13 +1,12 @@
 package com.redis.cluster
 
-import config._
 
 import com.redis._
 
 import serialization._
 import java.util.concurrent.{TimeUnit, ConcurrentLinkedQueue, Executors}
 import org.slf4j.LoggerFactory
-import java.util.concurrent.atomic.AtomicInteger
+import com.redis.PipelineBuffer
 
 /**
  * Consistent hashing distributes keys across multiple servers. But there are situations
@@ -57,7 +56,11 @@ object NoOpKeyTag extends KeyTag {
   def tag(key: Seq[Byte]) = Some(key)
 }
 
-abstract class RedisCluster(configManager: ConfigManager) extends RedisCommand with PubSub {
+abstract class RedisCluster(configManager: ConfigManager)
+  extends ClusterRedisCommand
+  with Pipeline
+  with NodeManager
+  with PubSub {
   val port = 0
   val host = null
 
@@ -73,12 +76,11 @@ abstract class RedisCluster(configManager: ConfigManager) extends RedisCommand w
   // instantiating a cluster will automatically connect participating nodes to the server
   val initialConfig = configManager.readConfig
 
-  val connectCount = new AtomicInteger()
-
   // the hash ring will instantiate with the nodes up and added
   val hr = new CopyOnWriteHashRing[RedisClientPool](
-    initialConfig.map {case (name, hostPort) =>
-        log.info(connectCount.incrementAndGet().toString +  ": Connecting to redis node " + name + "(" + hostPort + ")")
+    initialConfig.map {
+      case (name, hostPort) =>
+        log.info("Connecting to redis node " + name + "(" + hostPort + ")")
         (name, new RedisClientPool(hostPort.host, hostPort.port))
     },
     POINTS_PER_SERVER)
@@ -90,9 +92,9 @@ abstract class RedisCluster(configManager: ConfigManager) extends RedisCommand w
     val disconnectService = Executors.newSingleThreadScheduledExecutor()
     disconnectService.scheduleAtFixedRate(
       new Runnable {
-        def run()  {
+        def run() {
           val curTime = System.currentTimeMillis()
-          for(i <- 1 to queue.size()) {
+          for (i <- 1 to queue.size()) {
             queue.remove() match {
               case (time, client) if (curTime - time >= DisconnectTimeoutMs) =>
                 log.info("Closing redis client " + client)
@@ -102,7 +104,7 @@ abstract class RedisCluster(configManager: ConfigManager) extends RedisCommand w
           }
         }
       },
-    30,30, TimeUnit.SECONDS)
+      30, 30, TimeUnit.SECONDS)
 
     def submit(client: RedisClientPool) {
       queue.add((System.currentTimeMillis(), client))
@@ -117,7 +119,7 @@ abstract class RedisCluster(configManager: ConfigManager) extends RedisCommand w
 
       diff.updatedNodes.foreach {
         case (name, nodeConf) => {
-          log.info(connectCount.incrementAndGet().toString +  ": Changing node endpoint: " + name + " moved to " + nodeConf)
+          log.info("Changing node endpoint: " + name + " moved to " + nodeConf)
           val oldNode = hr.udpateNode(name, new RedisClientPool(nodeConf.host, nodeConf.port))
           DisconnectManager.submit(oldNode)
         }
@@ -136,36 +138,25 @@ abstract class RedisCluster(configManager: ConfigManager) extends RedisCommand w
 
   // get node for the key
   def nodeForKey(key: Any)(implicit format: Format) = {
+    poolForKey(key)
+  }
+
+  private[redis] def poolForKey(hr: HashRing[RedisClientPool],  key: Any)(implicit format: Format) = {
     val bKey = format(key)
     hr.getNode(keyTag.flatMap(_.tag(bKey)).getOrElse(bKey))
   }
 
-  // add a server
-  def addServer(name: String, server: String) = {
-    val hp = server.split(":")
-    hr.addNode(name, new RedisClientPool(hp(0), hp(1).toInt))
+  private[redis] def poolForKey(key: Any)(implicit format: Format) = {
+    val bKey = format(key)
+    hr.getNode(keyTag.flatMap(_.tag(bKey)).getOrElse(bKey))
   }
 
-  /**
-   * Operations
-   */
-  override def keys[A](pattern: Any = "*")(implicit format: Format, parse: Parse[A]) =
-    Some[List[Option[A]]](
-      hr.cluster.values.toList.map {
-        _.withClient(_.keys[A](pattern))
-      }.flatten.flatten
-    )
+
 
   def onAllConns[T](body: RedisClient => T) =
     hr.cluster.values.map(p => p.withClient {
       client => body(client)
     }) // .forall(_ == true)
-
-  override def flushdb = onAllConns(_.flushdb) forall (_ == true)
-
-  override def flushall = onAllConns(_.flushall) forall (_ == true)
-
-  override def quit = onAllConns(_.quit) forall (_ == true)
 
   def close = hr.cluster.values.foreach(_.close)
 
@@ -244,13 +235,19 @@ abstract class RedisCluster(configManager: ConfigManager) extends RedisCommand w
     Some(keylist.map(kvs))
   }
 
-  override def mset(kvs: (Any, Any)*)(implicit format: Format) = kvs.toList.map {
-    case (k, v) => set(k, v)
-  }.forall(_ == true)
+  private def poolForKeys(hr: HashRing[RedisClientPool], keys: Any*) = {
+    require(!keys.isEmpty,"Cannot determine node for empty keys set")
+    val nodes = keys.toList.map(poolForKey(hr, _))
+    nodes.forall(_ eq nodes.head) match {
+      case true => nodes.head // all nodes equal
+      case _ =>
+        throw new UnsupportedOperationException("can only occur if all keys map to same node")
+    }
+  }
 
-  override def msetnx(kvs: (Any, Any)*)(implicit format: Format) = kvs.toList.map {
-    case (k, v) => setnx(k, v)
-  }.forall(_ == true)
+
+  def inSameNode[T](keys: Any*)(body: RedisCommand => T)(implicit format: Format): T =
+    poolForKey(keys).withClient(body)
 
   /**
    * ListOperations
@@ -276,18 +273,7 @@ abstract class RedisCluster(configManager: ConfigManager) extends RedisCommand w
   override def rpop[A](key: Any)(implicit format: Format, parse: Parse[A]) = nodeForKey(key).withClient(_.rpop[A](key))
 
   override def rpoplpush[A](srcKey: Any, dstKey: Any)(implicit format: Format, parse: Parse[A]) =
-    inSameNode(srcKey, dstKey) {
-      n => n.withClient(_.rpoplpush[A](srcKey, dstKey))
-    }
-
-  private def inSameNode[T](keys: Any*)(body: RedisClientPool => T)(implicit format: Format): T = {
-    val nodes = keys.toList.map(nodeForKey(_))
-    nodes.forall(_ == nodes.head) match {
-      case true => body(nodes.head) // all nodes equal
-      case _ =>
-        throw new UnsupportedOperationException("can only occur if both keys map to same node")
-    }
-  }
+    inSameNode(srcKey, dstKey)(_.rpoplpush[A](srcKey, dstKey))
 
   /**
    * SetOperations
@@ -299,43 +285,74 @@ abstract class RedisCluster(configManager: ConfigManager) extends RedisCommand w
   override def spop[A](key: Any)(implicit format: Format, parse: Parse[A]) = nodeForKey(key).withClient(_.spop[A](key))
 
   override def smove(sourceKey: Any, destKey: Any, value: Any)(implicit format: Format) =
-    inSameNode(sourceKey, destKey) {
-      n => n.withClient(_.smove(sourceKey, destKey, value))
-    }
+    inSameNode(sourceKey, destKey)(_.smove(sourceKey, destKey, value))
 
   override def scard(key: Any)(implicit format: Format) = nodeForKey(key).withClient(_.scard(key))
 
   override def sismember(key: Any, value: Any)(implicit format: Format) = nodeForKey(key).withClient(_.sismember(key, value))
 
   override def sinter[A](key: Any, keys: Any*)(implicit format: Format, parse: Parse[A]) =
-    inSameNode((key :: keys.toList): _*) {
-      n => n.withClient(_.sinter[A](key, keys: _*))
-    }
+    inSameNode((key :: keys.toList): _*)(_.sinter[A](key, keys: _*))
 
   override def sinterstore(key: Any, keys: Any*)(implicit format: Format) =
-    inSameNode((key :: keys.toList): _*) {
-      n => n.withClient(_.sinterstore(key, keys: _*))
-    }
+    inSameNode((key :: keys.toList): _*)(_.sinterstore(key, keys: _*))
 
   override def sunion[A](key: Any, keys: Any*)(implicit format: Format, parse: Parse[A]) =
-    inSameNode((key :: keys.toList): _*) {
-      n => n.withClient(_.sunion[A](key, keys: _*))
+    inSameNode((key :: keys.toList): _*)(_.sunion[A](key, keys: _*))
+
+  /* Pipeline */
+
+
+  class SingleNodePipeline(parent: RedisCluster) extends ClusterRedisCommand with NodeManager {
+    val host = parent.host
+    val port = parent.port
+
+    val hr: HashRing[RedisClientPool] = parent.hr.ringRef.get()
+
+    var pool: RedisClientPool = _
+    var borrowedClient: RedisClient = _
+    var pipe: Option[PipelineBuffer] = None
+
+    private def pipelineNode(keys: Any*): RedisCommand = pipe match {
+      case Some(redis) =>
+        if(!(parent.poolForKeys(hr, keys: _*) eq pool))
+          throw new IllegalArgumentException("Pipeline operations for different nodes are not supported")
+        redis
+      case None =>
+        pool = parent.poolForKeys(hr, keys: _*)
+        borrowedClient = pool.pool.borrowObject().asInstanceOf[RedisClient]
+        pipe = Some(borrowedClient.pipelineBuffer)
+        pipelineNode(keys: _*)
     }
+
+    def inSameNode[T](keys: Any*)(body: (RedisCommand) => T)(implicit format: Format): T =
+      body(pipelineNode(keys: _*))
+
+
+    def nodeForKey(key: Any)(implicit format: Format) = pipelineNode(key)
+
+
+    def onAllConns[T](body: (RedisClient) => T) = throw new UnsupportedOperationException("Unsupported for cluster pipelineNode")
+
+    def flushAndGetResults(): List[AsyncResult[Any]] = pipe match {
+      case Some(redisPipe) =>
+        try {
+          redisPipe.flushAndGetResults()
+        } finally {
+          pool.pool.returnObject(borrowedClient)
+        }
+      case None => Nil
+    }
+  }
 
   override def sunionstore(key: Any, keys: Any*)(implicit format: Format) =
-    inSameNode((key :: keys.toList): _*) {
-      n => n.withClient(_.sunionstore(key, keys: _*))
-    }
+    inSameNode((key :: keys.toList): _*)(_.sunionstore(key, keys: _*))
 
   override def sdiff[A](key: Any, keys: Any*)(implicit format: Format, parse: Parse[A]) =
-    inSameNode((key :: keys.toList): _*) {
-      n => n.withClient(_.sdiff[A](key, keys: _*))
-    }
+    inSameNode((key :: keys.toList): _*)(_.sdiff[A](key, keys: _*))
 
   override def sdiffstore(key: Any, keys: Any*)(implicit format: Format) =
-    inSameNode((key :: keys.toList): _*) {
-      n => n.withClient(_.sdiffstore(key, keys: _*))
-    }
+    inSameNode((key :: keys.toList): _*)(_.sdiffstore(key, keys: _*))
 
   override def smembers[A](key: Any)(implicit format: Format, parse: Parse[A]) = nodeForKey(key).withClient(_.smembers(key))
 
@@ -397,4 +414,21 @@ abstract class RedisCluster(configManager: ConfigManager) extends RedisCommand w
   override def hgetall[K, V](key: Any)(implicit format: Format, parseK: Parse[K], parseV: Parse[V]) = nodeForKey(key).withClient(_.hgetall[K, V](key))
 
   override def hsetnx(key: Any, field: Any, value: Any)(implicit format: Format): Boolean = nodeForKey(key).withClient(_.hsetnx(key, field, value))
+
+  def pipeline(f: RedisCommand => Any) = {
+    val pipe = new SingleNodePipeline(this)
+    var error: Option[_ <: Exception] = None
+
+    try {
+      f(pipe)
+    } catch {
+      case e: Exception => error = Some(e)
+    }
+
+    error match {
+      case Some(RedisConnectionException(_)) => (Nil, error)
+      case _ => (pipe.flushAndGetResults(), error)
+    }
+
+  }
 }

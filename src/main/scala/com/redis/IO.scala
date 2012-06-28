@@ -15,13 +15,9 @@ trait IO extends Log {
   var db: Int = _
 
   def connected = {
-    socket != null &&
-    socket.isBound() &&
-    !socket.isClosed() &&
-    socket.isConnected() &&
-    !socket.isInputShutdown() &&
-    !socket.isOutputShutdown()
+    socket != null
   }
+
   def reconnect = {
     disconnect && connect
   }
@@ -33,9 +29,6 @@ trait IO extends Log {
       socket.setSoTimeout(0)
       socket.setKeepAlive(true)
       socket.setTcpNoDelay(true)
-      socket.setReuseAddress(true)
-      socket.setSoLinger(true,0)  //Control calls close () method, the underlying socket is closed immediately
-
       out = socket.getOutputStream
       in = new BufferedInputStream(socket.getInputStream)
       true
@@ -67,26 +60,41 @@ trait IO extends Log {
   }
 
   // Wrapper for the socket write operation.
-  def write_to_socket(data: Array[Byte])(op: OutputStream => Unit) = op(out)
+  def withSocket(op: OutputStream => Unit) = op(out)
 
   // Writes data to a socket using the specified block.
   def write(data: Array[Byte]) = {
     ifDebug("C: " + parseStringSafe(data))
     if (!connected) connect;
-    write_to_socket(data){ os =>
-      try {
-        os.write(data)
-        os.flush
-      } catch {
-        case x => reconnect;
-      }
+    withSocket {
+      os =>
+        try {
+          os.write(data)
+        } catch {
+          case x => reconnect;
+        }
     }
   }
 
-  private val crlf = List(13,10)
+  def flush() {
+    ifDebug("C: flush")
+    if (!connected)
+      connect
+    else
+      withSocket {
+        os =>
+          try {
+            os.flush
+          } catch {
+            case x => reconnect;
+          }
+      }
+  }
+
+  private val crlf = List(13, 10)
 
   def readLine: Array[Byte] = {
-    if(!connected) connect
+    if (!connected) connect
     var delimiter = crlf
     var found: List[Int] = Nil
     var build = new scala.collection.mutable.ArrayBuilder.ofByte
@@ -94,9 +102,7 @@ trait IO extends Log {
       val next = try {
         in.read
       } catch {
-        case e =>
-          error("Readline error " + e.getMessage, e)
-          -1
+        case e => -1
       }
       if (next < 0) return null
       if (next == delimiter.head) {
@@ -115,7 +121,7 @@ trait IO extends Log {
   }
 
   def readCounted(count: Int): Array[Byte] = {
-    if(!connected) connect
+    if (!connected) connect
     val arr = new Array[Byte](count)
     var cur = 0
     while (cur < count) {
