@@ -8,7 +8,7 @@ object ScalaRedisProject extends Build
 
   lazy val commonSettings: Seq[Setting[_]] = Seq(
     organization := "net.debasishg",
-    version := "2.6.3",
+    version := "2.7.0",
     scalaVersion := "2.9.1",
     scalacOptions ++= Seq("-deprecation", "-unchecked")
   )
@@ -32,7 +32,6 @@ object ScalaRedisProject extends Build
     resolvers := Seq(twitterRepo),
     parallelExecution in Test := false,
     publishTo <<= version { (v: String) => 
-      val jetlore = "http://repo.qwhisper.com/"
       if (v.trim.endsWith("SNAPSHOT")) Some(Resolver.sftp("Jetlore SSH", "qbeast", "/data/repo/snapshots") as("qwhisper"))
       else Some(Resolver.sftp("Jetlore SSH", "qbeast", "/data/repo/releases") as("qwhisper"))
     },
