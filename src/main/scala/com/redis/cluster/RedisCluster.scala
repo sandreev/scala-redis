@@ -136,17 +136,7 @@ abstract class RedisCluster(configManager: ConfigManager)
     }
   })
 
-  // get node for the key
-  def nodeForKey(key: Any)(implicit format: Format) = {
-    poolForKey(key)
-  }
-
-  private[redis] def poolForKey(hr: HashRing[RedisClientPool],  key: Any)(implicit format: Format) = {
-    val bKey = format(key)
-    hr.getNode(keyTag.flatMap(_.tag(bKey)).getOrElse(bKey))
-  }
-
-  private[redis] def poolForKey(key: Any)(implicit format: Format) = {
+  private[redis] def poolForKey(hr: HashRing[RedisClientPool],  key: Any)(implicit format: Format): RedisClientPool = {
     val bKey = format(key)
     hr.getNode(keyTag.flatMap(_.tag(bKey)).getOrElse(bKey))
   }
@@ -154,86 +144,9 @@ abstract class RedisCluster(configManager: ConfigManager)
 
 
   def onAllConns[T](body: RedisClient => T) =
-    hr.cluster.values.map(p => p.withClient {
-      client => body(client)
-    }) // .forall(_ == true)
+    hr.cluster.values.map(_.withClient (body))
 
   def close = hr.cluster.values.foreach(_.close)
-
-  override def rename(oldkey: Any, newkey: Any)(implicit format: Format): Boolean = nodeForKey(oldkey).withClient(_.rename(oldkey, newkey))
-
-  override def renamenx(oldkey: Any, newkey: Any)(implicit format: Format): Boolean = nodeForKey(oldkey).withClient(_.renamenx(oldkey, newkey))
-
-  override def dbsize: Option[Int] =
-    Some(onAllConns(_.dbsize).foldLeft(0)((a, b) => b.map(a +).getOrElse(a)))
-
-  override def exists(key: Any)(implicit format: Format): Boolean = nodeForKey(key).withClient(_.exists(key))
-
-  override def del(key: Any, keys: Any*)(implicit format: Format): Option[Int] =
-    Some((key :: keys.toList).groupBy(nodeForKey).foldLeft(0) {
-      case (t, (n, ks)) => n.withClient(_.del(ks.head, ks.tail: _*)).map(t +).getOrElse(t)
-    })
-
-  override def getType(key: Any)(implicit format: Format) = nodeForKey(key).withClient(_.getType(key))
-
-  override def expire(key: Any, expiry: Int)(implicit format: Format) = nodeForKey(key).withClient(_.expire(key, expiry))
-
-  override def expireAt(key: Any, expireAt: Int)(implicit format: Format) = nodeForKey(key).withClient(_.expireAt(key, expireAt))
-
-  override def select(index: Int) = throw new UnsupportedOperationException("not supported on a cluster")
-
-  /**
-   * NodeOperations
-   */
-  override def save = onAllConns(_.save) forall (_ == true)
-
-  override def bgsave = onAllConns(_.bgsave) forall (_ == true)
-
-  override def shutdown = onAllConns(_.shutdown) forall (_ == true)
-
-  override def bgrewriteaof = onAllConns(_.bgrewriteaof) forall (_ == true)
-
-  override def lastsave = throw new UnsupportedOperationException("not supported on a cluster")
-
-  override def monitor = throw new UnsupportedOperationException("not supported on a cluster")
-
-  override def info = throw new UnsupportedOperationException("not supported on a cluster")
-
-  override def slaveof(options: Any) = throw new UnsupportedOperationException("not supported on a cluster")
-
-  override def move(key: Any, db: Int)(implicit format: Format) = throw new UnsupportedOperationException("not supported on a cluster")
-
-  override def auth(secret: Any)(implicit format: Format) = throw new UnsupportedOperationException("not supported on a cluster")
-
-
-  /**
-   * StringOperations
-   */
-  override def set(key: Any, value: Any)(implicit format: Format) = nodeForKey(key).withClient(_.set(key, value))
-
-  override def get[A](key: Any)(implicit format: Format, parse: Parse[A]) = nodeForKey(key).withClient(_.get(key))
-
-  override def getset[A](key: Any, value: Any)(implicit format: Format, parse: Parse[A]) = nodeForKey(key).withClient(_.getset(key, value))
-
-  override def setnx(key: Any, value: Any)(implicit format: Format) = nodeForKey(key).withClient(_.setnx(key, value))
-
-  override def incr(key: Any)(implicit format: Format) = nodeForKey(key).withClient(_.incr(key))
-
-  override def incrby(key: Any, increment: Int)(implicit format: Format) = nodeForKey(key).withClient(_.incrby(key, increment))
-
-  override def decr(key: Any)(implicit format: Format) = nodeForKey(key).withClient(_.decr(key))
-
-  override def decrby(key: Any, increment: Int)(implicit format: Format) = nodeForKey(key).withClient(_.decrby(key, increment))
-
-  override def mget[A](key: Any, keys: Any*)(implicit format: Format, parse: Parse[A]): Option[List[Option[A]]] = {
-    val keylist = (key :: keys.toList)
-    val kvs = for {
-      (n, ks) <- keylist.groupBy(nodeForKey)
-      vs <- n.withClient(_.mget[A](ks.head, ks.tail: _*).toList)
-      kv <- (ks).zip(vs)
-    } yield kv
-    Some(keylist.map(kvs))
-  }
 
   private def poolForKeys(hr: HashRing[RedisClientPool], keys: Any*) = {
     require(!keys.isEmpty,"Cannot determine node for empty keys set")
@@ -247,61 +160,21 @@ abstract class RedisCluster(configManager: ConfigManager)
 
 
   def inSameNode[T](keys: Any*)(body: RedisCommand => T)(implicit format: Format): T =
-    poolForKey(keys).withClient(body)
+    poolForKeys(hr.ringRef.get, keys: _*).withClient(body)
 
-  /**
-   * ListOperations
-   */
-  override def lpush(key: Any, value: Any, values: Any*)(implicit format: Format) = nodeForKey(key).withClient(_.lpush(key, value, values: _*))
+  def withNode[T](key: Any)(body: (RedisCommand) => T)(implicit format: Format): T =
+    poolForKeys(hr.ringRef.get, key).withClient(body)
 
-  override def rpush(key: Any, value: Any, values: Any*)(implicit format: Format) = nodeForKey(key).withClient(_.lpush(key, value, values: _*))
-
-  override def llen(key: Any)(implicit format: Format) = nodeForKey(key).withClient(_.llen(key))
-
-  override def lrange[A](key: Any, start: Int, end: Int)(implicit format: Format, parse: Parse[A]) = nodeForKey(key).withClient(_.lrange[A](key, start, end))
-
-  override def ltrim(key: Any, start: Int, end: Int)(implicit format: Format) = nodeForKey(key).withClient(_.ltrim(key, start, end))
-
-  override def lindex[A](key: Any, index: Int)(implicit format: Format, parse: Parse[A]) = nodeForKey(key).withClient(_.lindex(key, index))
-
-  override def lset(key: Any, index: Int, value: Any)(implicit format: Format) = nodeForKey(key).withClient(_.lset(key, index, value))
-
-  override def lrem(key: Any, count: Int, value: Any)(implicit format: Format) = nodeForKey(key).withClient(_.lrem(key, count, value))
-
-  override def lpop[A](key: Any)(implicit format: Format, parse: Parse[A]) = nodeForKey(key).withClient(_.lpop[A](key))
-
-  override def rpop[A](key: Any)(implicit format: Format, parse: Parse[A]) = nodeForKey(key).withClient(_.rpop[A](key))
-
-  override def rpoplpush[A](srcKey: Any, dstKey: Any)(implicit format: Format, parse: Parse[A]) =
-    inSameNode(srcKey, dstKey)(_.rpoplpush[A](srcKey, dstKey))
-
-  /**
-   * SetOperations
-   */
-  override def sadd(key: Any, value: Any, values: Any*)(implicit format: Format): Option[Int] = nodeForKey(key).withClient(_.sadd(key, value, values: _*))
-
-  override def srem(key: Any, value: Any, values: Any*)(implicit format: Format): Option[Int] = nodeForKey(key).withClient(_.srem(key, value, values: _*))
-
-  override def spop[A](key: Any)(implicit format: Format, parse: Parse[A]) = nodeForKey(key).withClient(_.spop[A](key))
-
-  override def smove(sourceKey: Any, destKey: Any, value: Any)(implicit format: Format) =
-    inSameNode(sourceKey, destKey)(_.smove(sourceKey, destKey, value))
-
-  override def scard(key: Any)(implicit format: Format) = nodeForKey(key).withClient(_.scard(key))
-
-  override def sismember(key: Any, value: Any)(implicit format: Format) = nodeForKey(key).withClient(_.sismember(key, value))
-
-  override def sinter[A](key: Any, keys: Any*)(implicit format: Format, parse: Parse[A]) =
-    inSameNode((key :: keys.toList): _*)(_.sinter[A](key, keys: _*))
-
-  override def sinterstore(key: Any, keys: Any*)(implicit format: Format) =
-    inSameNode((key :: keys.toList): _*)(_.sinterstore(key, keys: _*))
-
-  override def sunion[A](key: Any, keys: Any*)(implicit format: Format, parse: Parse[A]) =
-    inSameNode((key :: keys.toList): _*)(_.sunion[A](key, keys: _*))
+  def groupByNodes[T](key: Any, keys: Any*)(body: (RedisCommand, Seq[Any]) => T)(implicit format: Format) = {
+    val ring = hr.ringRef.get
+    val keyList = key :: keys.toList
+    keyList.groupBy(key => ring.getNode(format(key))).toSeq.map {
+      case (pool, keys) =>
+        pool.withClient(body(_, keys))
+    }
+  }
 
   /* Pipeline */
-
 
   class SingleNodePipeline(parent: RedisCluster) extends ClusterRedisCommand with NodeManager {
     val host = parent.host
@@ -328,9 +201,14 @@ abstract class RedisCluster(configManager: ConfigManager)
     def inSameNode[T](keys: Any*)(body: (RedisCommand) => T)(implicit format: Format): T =
       body(pipelineNode(keys: _*))
 
+    def withNode[T](key: Any)(body: (RedisCommand) => T)(implicit format: Format) =
+      body(pipelineNode(key))
 
-    def nodeForKey(key: Any)(implicit format: Format) = pipelineNode(key)
 
+    def groupByNodes[T](key: Any, keys: Any*)(body: (RedisCommand, Seq[Any]) => T)(implicit format: Format) = {
+      val keyList = key :: keys.toList
+      List(inSameNode(keyList: _*)(body(_, keyList)))
+    }
 
     def onAllConns[T](body: (RedisClient) => T) = throw new UnsupportedOperationException("Unsupported for cluster pipelineNode")
 
@@ -344,76 +222,6 @@ abstract class RedisCluster(configManager: ConfigManager)
       case None => Nil
     }
   }
-
-  override def sunionstore(key: Any, keys: Any*)(implicit format: Format) =
-    inSameNode((key :: keys.toList): _*)(_.sunionstore(key, keys: _*))
-
-  override def sdiff[A](key: Any, keys: Any*)(implicit format: Format, parse: Parse[A]) =
-    inSameNode((key :: keys.toList): _*)(_.sdiff[A](key, keys: _*))
-
-  override def sdiffstore(key: Any, keys: Any*)(implicit format: Format) =
-    inSameNode((key :: keys.toList): _*)(_.sdiffstore(key, keys: _*))
-
-  override def smembers[A](key: Any)(implicit format: Format, parse: Parse[A]) = nodeForKey(key).withClient(_.smembers(key))
-
-  override def srandmember[A](key: Any)(implicit format: Format, parse: Parse[A]) = nodeForKey(key).withClient(_.srandmember(key))
-
-
-  import RedisClient._
-
-  /**
-   * SortedSetOperations
-   */
-  override def zadd(key: Any, score: Double, member: Any, scoreVals: (Double, Any)*)(implicit format: Format) =
-    nodeForKey(key).withClient(_.zadd(key, score, member, scoreVals: _*))
-
-  override def zrem(key: Any, member: Any, members: Any*)(implicit format: Format): Option[Int] =
-    nodeForKey(key).withClient(_.zrem(key, member, members))
-
-  override def zincrby(key: Any, incr: Double, member: Any)(implicit format: Format) = nodeForKey(key).withClient(_.zincrby(key, incr, member))
-
-  override def zcard(key: Any)(implicit format: Format) = nodeForKey(key).withClient(_.zcard(key))
-
-  override def zscore(key: Any, element: Any)(implicit format: Format) = nodeForKey(key).withClient(_.zscore(key, element))
-
-  override def zrange[A](key: Any, start: Int = 0, end: Int = -1, sortAs: SortOrder)(implicit format: Format, parse: Parse[A]) =
-    nodeForKey(key).withClient(_.zrange[A](key, start, end, sortAs))
-
-  override def zrangeWithScore[A](key: Any, start: Int = 0, end: Int = -1, sortAs: SortOrder = ASC)(implicit format: Format, parse: Parse[A]) =
-    nodeForKey(key).withClient(_.zrangeWithScore[A](key, start, end, sortAs))
-
-  override def zrangebyscore[A](key: Any, min: Double = Double.NegativeInfinity, minInclusive: Boolean = true, max: Double = Double.PositiveInfinity, maxInclusive: Boolean = true, limit: Option[(Int, Int)], sortAs: SortOrder = ASC)(implicit format: Format, parse: Parse[A]) =
-    nodeForKey(key).withClient(_.zrangebyscore[A](key, min, minInclusive, max, maxInclusive, limit, sortAs))
-
-  override def zcount(key: Any, min: Double = Double.NegativeInfinity, max: Double = Double.PositiveInfinity, minInclusive: Boolean = true, maxInclusive: Boolean = true)(implicit format: Format): Option[Int] =
-    nodeForKey(key).withClient(_.zcount(key, min, max, minInclusive, maxInclusive))
-
-  /**
-   * HashOperations
-   */
-  override def hset(key: Any, field: Any, value: Any)(implicit format: Format) = nodeForKey(key).withClient(_.hset(key, field, value))
-
-  override def hget[A](key: Any, field: Any)(implicit format: Format, parse: Parse[A]) = nodeForKey(key).withClient(_.hget[A](key, field))
-
-  override def hmset(key: Any, map: Iterable[Product2[Any, Any]])(implicit format: Format) = nodeForKey(key).withClient(_.hmset(key, map))
-
-  override def hmget[K, V](key: Any, fields: K*)(implicit format: Format, parseV: Parse[V]) = nodeForKey(key).withClient(_.hmget[K, V](key, fields: _*))
-
-  override def hincrby(key: Any, field: Any, value: Int)(implicit format: Format) = nodeForKey(key).withClient(_.hincrby(key, field, value))
-
-  override def hexists(key: Any, field: Any)(implicit format: Format) = nodeForKey(key).withClient(_.hexists(key, field))
-
-  override def hdel(key: Any, field: Any, fields: Any*)(implicit format: Format): Option[Int] = nodeForKey(key).withClient(_.hdel(key, field, fields: _*))
-
-  override def hlen(key: Any)(implicit format: Format) = nodeForKey(key).withClient(_.hlen(key))
-
-  override def hkeys[A](key: Any)(implicit format: Format, parse: Parse[A]) = nodeForKey(key).withClient(_.hkeys[A](key))
-
-  override def hvals[A](key: Any)(implicit format: Format, parse: Parse[A]) = nodeForKey(key).withClient(_.hvals[A](key))
-
-  override def hgetall[K, V](key: Any)(implicit format: Format, parseK: Parse[K], parseV: Parse[V]) = nodeForKey(key).withClient(_.hgetall[K, V](key))
-
-  override def hsetnx(key: Any, field: Any, value: Any)(implicit format: Format): Boolean = nodeForKey(key).withClient(_.hsetnx(key, field, value))
 
   def pipeline(f: RedisCommand => Any) = {
     val pipe = new SingleNodePipeline(this)

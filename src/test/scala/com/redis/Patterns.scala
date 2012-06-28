@@ -25,6 +25,7 @@ import com.twitter.util.{Timer, JavaTimer}
 object Patterns {
   def listPush(count: Int, key: String)(implicit clients: RedisClientPool) = { 
     clients.withClient { client =>
+      assert(key != null)
       (1 to count) foreach {i => client.rpush(key, i)}
       assert(client.llen(key) == Some(count))
     }

@@ -86,7 +86,7 @@ with BeforeAndAfterAll {
   }
 
   describe("pipeline5") {
-    it("should execute commands terminate on connection exception while sending commands ") {
+    it("should terminate on connection exception while sending commands ") {
       val res = r.pipeline {
         p =>
           p.set("a", "abc")

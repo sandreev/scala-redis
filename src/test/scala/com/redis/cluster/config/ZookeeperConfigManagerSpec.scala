@@ -57,7 +57,11 @@ class ZookeeperConfigManagerSpec extends WordSpec with ShouldMatchers {
       setConfig(newConf)
       Thread.sleep(1000)
 
-      queue.peek() should be(newConf)
+      var lastConf: Any = null
+      while(!queue.isEmpty)
+        lastConf = queue.remove()
+
+      lastConf should be(newConf)
 
     }
   }

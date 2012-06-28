@@ -40,10 +40,10 @@ with MockitoSugar {
       val l = List("debasish", "maulindu", "ramanendu", "nilanjan", "tarun", "tarun", "tarun")
 
       // last 3 should map to the same node
-      l.map(r.nodeForKey(_)).reverse.slice(0, 3).toSet.size should equal(1)
+      l.map(r.withNode(_)(n => n)).reverse.slice(0, 3).toSet.size should equal(1)
 
       // set
-      l foreach (s => r.nodeForKey(s).set(s, "working in anshin") should equal(true))
+      l foreach (s => r.withNode(s)(_.set(s, "working in anshin") should equal(true)))
 
       // check get: should return all 5
       r.keys("*").get.size should equal(5)
@@ -53,7 +53,7 @@ with MockitoSugar {
       val l = List("debasish", "maulindu", "ramanendu", "nilanjan", "tarun", "tarun", "tarun")
 
       // set
-      l foreach (s => r.nodeForKey(s).set(s, s + " is working in anshin") should equal(true))
+      l foreach (s => r.withNode(s)(_.set(s, s + " is working in anshin") should equal(true)))
 
       r.get("debasish").get should equal("debasish is working in anshin")
       r.get("maulindu").get should equal("maulindu is working in anshin")
@@ -64,7 +64,7 @@ with MockitoSugar {
       val l = List("debasish", "maulindu", "ramanendu", "nilanjan", "tarun", "tarun", "tarun")
 
       // set
-      l foreach (s => r.nodeForKey(s).set(s, s + " is working in anshin") should equal(true))
+      l foreach (s => r.withNode(s)(_.set(s, s + " is working in anshin") should equal(true)))
 
       r.dbsize.get should equal(5)
       r.exists("debasish") should equal(true)
@@ -80,7 +80,7 @@ with MockitoSugar {
       val l = List("debasish", "maulindu", "ramanendu", "nilanjan", "tarun", "tarun", "tarun")
 
       // set
-      l foreach (s => r.nodeForKey(s).set(s, s + " is working in anshin") should equal(true))
+      l foreach (s => r.withNode(s)(_.set(s, s + " is working in anshin") should equal(true)))
 
       // mget
       r.mget(l.head, l.tail: _*).get.map(_.get.split(" ")(0)) should equal(l)
