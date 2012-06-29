@@ -221,9 +221,9 @@ abstract class RedisCluster(configManager: ConfigManager)
           val nodeResults = try {
             indexes zip pipe.flushAndGetResults()
           } catch {
-            case e =>
+            case e: Exception =>
               val errReport = Left(e)
-              indexes zip Array.fill(indexes.size)(errReport)
+              (indexes zip Array.fill(indexes.size)(errReport)).toList
           }
 
 
