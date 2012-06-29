@@ -5,7 +5,7 @@ import org.scalatest.junit.JUnitRunner
 import org.scalatest.{BeforeAndAfterAll, BeforeAndAfterEach, Spec}
 import org.scalatest.matchers.ShouldMatchers
 import org.scalatest.mock.MockitoSugar
-import com.redis.{ExecError, RedisConnectionException, Success}
+import com.redis.{RedisConnectionException, Success}
 
 @RunWith(classOf[JUnitRunner])
 class ClusterPipelineSpec extends Spec
@@ -104,17 +104,21 @@ with MockitoSugar {
   }
 
   describe("pipeline5") {
-    it("should prohibit commands with keys mapping to different nodes") {
+    it("should keep order of commands with keys mapping to different nodes") {
       val res = r.pipeline {
         p =>
-          for (i <- 1 to 100)
-            p.set(i, i+1)
+          for (i <- 1 to 1000)
+            p.rpush(i % 100, i / 100)
       }
 
-      (res.right.get.size < 100) should equal(true)
+      val expectedRes = Right((
+        for (i <- 1 to 10;
+             j <- 1 to 100) yield Right(Some(i))
+      ).toList)
+
+      res should equal(expectedRes)
     }
   }
-
 
 
 }
