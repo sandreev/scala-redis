@@ -213,7 +213,10 @@ abstract class RedisCluster(configManager: ConfigManager)
 
     def onAllConns[T](body: (RedisClient) => T) = throw new UnsupportedOperationException("Unsupported for cluster pipelineNode")
 
-    def groupByNodes[T](key: Any, keys: Any*)(body: (RedisCommand, Seq[Any]) => T)(implicit format: Format) = throw new UnsupportedOperationException("Unsupported for cluster pipelineNode")
+    def groupByNodes[T](key: Any, keys: Any*)(body: (RedisCommand, Seq[Any]) => T)(implicit format: Format) = {
+      val keyList = key :: keys.toList
+      List(inSameNode(keyList: _*)(body(_, keyList)))
+    }
 
     def flushAndGetResults(): List[Either[Exception, Any]] = {
       borrowedClients.toSeq.map {
