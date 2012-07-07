@@ -7,6 +7,8 @@ import serialization._
 import java.util.concurrent.{TimeUnit, ConcurrentLinkedQueue, Executors}
 import org.slf4j.LoggerFactory
 import com.redis.PipelineBuffer
+import java.util
+import collection.mutable.ListBuffer
 
 /**
  * Consistent hashing distributes keys across multiple servers. But there are situations
@@ -146,7 +148,9 @@ abstract class RedisCluster(configManager: ConfigManager)
   def onAllConns[T](body: RedisClient => T) =
     hr.cluster.values.map(_.withClient (body))
 
-  def close = hr.cluster.values.foreach(_.close)
+  def close() {
+    hr.cluster.values.foreach(_.close)
+  }
 
   private def poolForKeys(hr: HashRing[RedisClientPool], keys: Any*) = {
     require(!keys.isEmpty,"Cannot determine node for empty keys set")
@@ -176,26 +180,29 @@ abstract class RedisCluster(configManager: ConfigManager)
 
   /* Pipeline */
 
-  class SingleNodePipeline(parent: RedisCluster) extends ClusterRedisCommand with NodeManager {
+  private class MultiNodePipeline(parent: RedisCluster) extends ClusterRedisCommand with NodeManager {
     val host = parent.host
     val port = parent.port
-
     val hr: HashRing[RedisClientPool] = parent.hr.ringRef.get()
 
-    var pool: RedisClientPool = _
-    var borrowedClient: RedisClient = _
-    var pipe: Option[PipelineBuffer] = None
+    case class PipelineEntry(client: RedisClient, pipeline: PipelineBuffer, opIdxs: ListBuffer[Int])
 
-    private def pipelineNode(keys: Any*): RedisCommand = pipe match {
-      case Some(redis) =>
-        if(!(parent.poolForKeys(hr, keys: _*) eq pool))
-          throw new IllegalArgumentException("Pipeline operations for different nodes are not supported")
-        redis
-      case None =>
-        pool = parent.poolForKeys(hr, keys: _*)
-        borrowedClient = pool.pool.borrowObject().asInstanceOf[RedisClient]
-        pipe = Some(borrowedClient.pipelineBuffer)
-        pipelineNode(keys: _*)
+    val borrowedClients = collection.JavaConversions.mapAsScalaMap(new util.IdentityHashMap[RedisClientPool, PipelineEntry])
+    var operationIdx = 0
+
+    private def pipelineNode(keys: Any*): RedisCommand = {
+      val pool = parent.poolForKeys(hr, keys: _*)
+      borrowedClients.get(pool) match {
+        case Some(PipelineEntry(_, pipe, ops)) =>
+          ops += operationIdx
+          operationIdx += 1
+          pipe
+        case None =>
+          val client = pool.pool.borrowObject().asInstanceOf[RedisClient]
+          val pipeline = client.pipelineBuffer
+          borrowedClients += (pool -> PipelineEntry(client, pipeline, ListBuffer.empty[Int]))
+          pipelineNode(keys: _*)
+      }
     }
 
     def inSameNode[T](keys: Any*)(body: (RedisCommand) => T)(implicit format: Format): T =
@@ -204,27 +211,33 @@ abstract class RedisCluster(configManager: ConfigManager)
     def withNode[T](key: Any)(body: (RedisCommand) => T)(implicit format: Format) =
       body(pipelineNode(key))
 
+    def onAllConns[T](body: (RedisClient) => T) = throw new UnsupportedOperationException("Unsupported for cluster pipelineNode")
 
     def groupByNodes[T](key: Any, keys: Any*)(body: (RedisCommand, Seq[Any]) => T)(implicit format: Format) = {
       val keyList = key :: keys.toList
       List(inSameNode(keyList: _*)(body(_, keyList)))
     }
 
-    def onAllConns[T](body: (RedisClient) => T) = throw new UnsupportedOperationException("Unsupported for cluster pipelineNode")
+    def flushAndGetResults(): List[Either[Exception, Any]] = {
+      borrowedClients.toSeq.map {
+        case (pool, PipelineEntry(client, pipe, indexes)) =>
+          val nodeResults = try {
+            indexes zip pipe.flushAndGetResults()
+          } catch {
+            case e: Exception =>
+              val errReport = Left(e)
+              (indexes zip Array.fill(indexes.size)(errReport)).toList
+          }
 
-    def flushAndGetResults(): List[Either[Exception, Any]] = pipe match {
-      case Some(redisPipe) =>
-        try {
-          redisPipe.flushAndGetResults()
-        } finally {
-          pool.pool.returnObject(borrowedClient)
-        }
-      case None => Nil
+
+          pool.pool.returnObject(client)
+          nodeResults
+      }.flatten.sortBy(_._1).map(_._2).toList
     }
   }
 
   def pipeline(f: RedisCommand => Any) = {
-    val pipe = new SingleNodePipeline(this)
+    val pipe = new MultiNodePipeline(this)
 
     val ex = try {
       f(pipe)
