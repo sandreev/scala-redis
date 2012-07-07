@@ -168,7 +168,7 @@ abstract class RedisCluster(configManager: ConfigManager)
   def groupByNodes[T](key: Any, keys: Any*)(body: (RedisCommand, Seq[Any]) => T)(implicit format: Format) = {
     val ring = hr.ringRef.get
     val keyList = key :: keys.toList
-    keyList.groupBy(key => ring.getNode(format(key))).toSeq.map {
+    keyList.groupBy(key => ring.getNode(keyTag.flatMap(_.tag(format(key))).getOrElse(format(key)))).toSeq.map {
       case (pool, keys) =>
         pool.withClient(body(_, keys))
     }
