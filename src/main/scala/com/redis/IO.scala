@@ -29,7 +29,7 @@ trait IO extends Log {
       socket.setSoTimeout(0)
       socket.setKeepAlive(true)
       socket.setTcpNoDelay(true)
-      out = socket.getOutputStream
+      out = new BufferedOutputStream(socket.getOutputStream)
       in = new BufferedInputStream(socket.getInputStream)
       true
     } catch {
@@ -42,13 +42,17 @@ trait IO extends Log {
   // Disconnects the socket.
   def disconnect: Boolean = {
     try {
-      socket.close
-      out.close
-      in.close
+      if(socket != null)
+        socket.close
+      if(out != null)
+        out.close
+      if(in != null)
+        in.close
       clearFd
       true
     } catch {
       case x =>
+        error("Error closing socket", x)
         false
     }
   }
@@ -71,7 +75,9 @@ trait IO extends Log {
         try {
           os.write(data)
         } catch {
-          case x => reconnect;
+          case x =>
+            error("Error sending data", x)
+            reconnect;
         }
     }
   }
@@ -86,7 +92,9 @@ trait IO extends Log {
           try {
             os.flush
           } catch {
-            case x => reconnect;
+            case x =>
+              error("Error flushing buffered output", x)
+              reconnect;
           }
       }
   }
@@ -102,7 +110,9 @@ trait IO extends Log {
       val next = try {
         in.read
       } catch {
-        case e => -1
+        case e =>
+          error("Error reading data", e)
+          -1
       }
       if (next < 0) return null
       if (next == delimiter.head) {

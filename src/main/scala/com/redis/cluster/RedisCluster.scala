@@ -36,7 +36,7 @@ import collection.mutable.ListBuffer
  * </i>
  */
 trait KeyTag {
-  def tag(key: Seq[Byte]): Option[Seq[Byte]]
+  def tag(key: Array[Byte]): Option[Array[Byte]]
 }
 
 
@@ -45,17 +45,22 @@ object RegexKeyTag extends KeyTag {
   val tagStart = '{'.toByte
   val tagEnd = '}'.toByte
 
-  def tag(key: Seq[Byte]) = {
+  def tag(key: Array[Byte]) = {
     val start = key.indexOf(tagStart) + 1
     if (start > 0) {
       val end = key.indexOf(tagEnd, start)
-      if (end > -1) Some(key.slice(start, end)) else None
+      if (end > -1) {
+        val slice = new Array[Byte](end - start)
+        Array.copy(key, start, slice, 0, slice.length)
+        Some(slice)
+      } else
+        None
     } else None
   }
 }
 
 object NoOpKeyTag extends KeyTag {
-  def tag(key: Seq[Byte]) = Some(key)
+  def tag(key: Array[Byte]) = Some(key)
 }
 
 abstract class RedisCluster(configManager: ConfigManager)
@@ -219,20 +224,32 @@ abstract class RedisCluster(configManager: ConfigManager)
     }
 
     def flushAndGetResults(): List[Either[Exception, Any]] = {
-      borrowedClients.toSeq.map {
+      val arr = new Array[Either[Exception, Any]](this.operationIdx)
+
+      borrowedClients.foreach{
         case (pool, PipelineEntry(client, pipe, indexes)) =>
-          val nodeResults = try {
-            indexes zip pipe.flushAndGetResults()
+          var errorOccurred = false
+          try {
+            val iter = indexes.iterator
+            pipe.flushAndGetResults().foreach {
+              arr(iter.next()) = _
+            }
+
           } catch {
             case e: Exception =>
               val errReport = Left(e)
-              (indexes zip Array.fill(indexes.size)(errReport)).toList
+              indexes.foreach{
+                arr(_) = errReport
+              }
+              errorOccurred = true
+          } finally {
+            if (errorOccurred)
+              pool.pool.invalidateObject(client)
+            else
+              pool.pool.returnObject(client)
           }
-
-
-          pool.pool.returnObject(client)
-          nodeResults
-      }.flatten.sortBy(_._1).map(_._2).toList
+      }
+      arr.toList
     }
   }
 

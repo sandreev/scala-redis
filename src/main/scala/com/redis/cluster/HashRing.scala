@@ -1,56 +1,52 @@
 package com.redis.cluster
 
-import java.util.zip.CRC32
-import collection.immutable.SortedMap
+import java.util
+import org.apache.hadoop.util.PureJavaCrc32New
 
-class HashRing[T](val cluster: Map[String, T], val ring: SortedMap[Long, T], replicas: Int) {
+class HashRing[T](val cluster: Map[String, T], val ring: Array[(Long, T)], replicas: Int) {
 
   import HashRing._
 
-  // adds a node to the hash ring (including a number of replicas)
-  def addNode(nodeName: String, node: T) = {
-    require(!cluster.contains(nodeName), "Cluster already contains node '" + nodeName + "'")
-    val pairs = (1 to replicas).map {
-      replica => (calculateChecksum((nodeName + ":" + replica).getBytes("UTF-8")), node)
-    }
-    new HashRing[T](cluster + (nodeName -> node), ring ++ pairs, replicas)
-  }
-
-  // remove node from the ring
-  def removeNode(nodeName: String) = {
+  def moveNode(nodeName: String, node: T) = {
     require(cluster.contains(nodeName), "Cluster does not contain node '" + nodeName + "'")
-    val keys = (1 to replicas).map {
-      replica => calculateChecksum((nodeName + ":" + replica).getBytes("UTF-8"))
-    }
-    new HashRing[T](cluster - nodeName, ring -- keys, replicas)
+    HashRing(cluster + (nodeName -> node), replicas)
   }
 
   // get node for the key
-  def getNode(key: Seq[Byte]): T = {
+  def getNode(key: Array[Byte]): T = {
     val crc = calculateChecksum(key)
-    if (ring contains crc) ring(crc)
-    else {
-      if (crc < ring.firstKey) ring.head._2
-      else if (crc > ring.lastKey) ring.last._2
-      else ring.rangeImpl(None, Some(crc)).last._2
-    }
+    ringNode(ring, crc)
   }
 }
 
 object HashRing {
+  def entryComparator[T] = new util.Comparator[(Long, T)] {
+    def compare(o1: (Long, T), o2: (Long, T)) = o1._1.compareTo(o2._1)
+  }
+
   def apply[T](nodes: Map[String, T], replicas: Int) = {
     val pairs =
-      for ((nodeName, node) <- nodes.toSeq;
+      (for ((nodeName, node) <- nodes.toSeq;
            replica <- 1 to replicas) yield {
         (calculateChecksum((nodeName + ":" + replica).getBytes("UTF-8")), node)
-      }
-    new HashRing[T](nodes, SortedMap(pairs: _*), replicas)
+      }).toArray
+    util.Arrays.sort(pairs, 0, pairs.length, entryComparator[T])
+    new HashRing[T](nodes, pairs, replicas)
   }
 
   // Computes the CRC-32 of the given String
-  def calculateChecksum(value: Seq[Byte]): Long = {
-    val checksum = new CRC32
-    checksum.update(value.toArray)
-    checksum.getValue
+  def calculateChecksum(value: Array[Byte]): Long = {
+    val crc = new PureJavaCrc32New
+    crc.update(value, 0, value.length)
+    crc.getValue()
+  }
+
+  def ringNode[T](ring: Array[(Long, T)], crc: Long) = {
+    util.Arrays.binarySearch(ring, (crc, null.asInstanceOf[T]), entryComparator[T]) match {
+      case found if found >= 0 => ring(found)._2
+      case greaterMax if greaterMax == - ring.length - 1 => ring(ring.length - 1)._2
+      case candidate => ring(- candidate - 1)._2
+    }
+
   }
 }
