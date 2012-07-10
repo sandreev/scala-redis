@@ -45,7 +45,8 @@ object HashRing {
     util.Arrays.binarySearch(ring, (crc, null.asInstanceOf[T]), entryComparator[T]) match {
       case found if found >= 0 => ring(found)._2
       case greaterMax if greaterMax == - ring.length - 1 => ring(ring.length - 1)._2
-      case candidate => ring(- candidate - 1)._2
+      case lessMin if lessMin == -1 => ring(0)._2
+      case candidate => ring(- candidate - 2)._2
     }
 
   }
