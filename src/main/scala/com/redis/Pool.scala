@@ -25,7 +25,8 @@ private [redis] class RedisClientFactory(host: String, port: Int) extends Poolab
 
 class RedisClientPool(host: String, port: Int) {
 
-  val pool = new StackObjectPool(new RedisClientFactory(host, port), 2, 1)
+  //val pool = new StackObjectPool(new RedisClientFactory(host, port), 2, 1)
+  val pool = new SimplePool[RedisClient](new RedisClientFactory(host, port), 1, 2)
 
   override def toString = host + ":" + String.valueOf(port)
 

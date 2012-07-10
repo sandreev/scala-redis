@@ -16,7 +16,9 @@ class MultiClientSpec extends Spec
 
   val r = new RedisClient("localhost", 6379)
 
-  override def beforeEach = {
+
+  override protected def beforeAll() {
+    r.flushdb
   }
 
   override def afterEach = {
