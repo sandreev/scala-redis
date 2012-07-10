@@ -39,6 +39,7 @@ trait PipelineStress {
       resetEnv()
       totalTime += measure(() => withRedis(r => onlyIncrs(r, opsInIteration)))
     }
+    withRedis(r => require(r.keys("*").get.size == 100))
     println(name + ": " +(totalTime / nChecks))
   }
 

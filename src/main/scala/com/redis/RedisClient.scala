@@ -82,6 +82,7 @@ class RedisClient(override val host: String, override val port: Int)
 
     val ex = try {
       f(pipe)
+      pipe.flush()
       None
     } catch {
       case e: Exception => Some(e)
@@ -89,7 +90,7 @@ class RedisClient(override val host: String, override val port: Int)
 
     ex match {
       case Some(e @ RedisConnectionException(_)) => Left(e)
-      case _ => Right(pipe.flushAndGetResults())
+      case _ => Right(pipe.readResults())
     }
   }
 
@@ -98,6 +99,7 @@ class RedisClient(override val host: String, override val port: Int)
   class MultiClient(parent: RedisClient) extends RedisCommand {
 
     import serialization.Parse
+
 
     var handlers: Vector[() => Any] = Vector.empty
 
@@ -146,11 +148,12 @@ class RedisClient(override val host: String, override val port: Int)
 }
 
 class PipelineBuffer(parent: RedisClient) extends RedisCommand {
-  var handlers: Vector[() => Any] = Vector.empty
+  var handlers: List[() => Any] = List.empty
+  var handlersCount = 0
 
-  private[redis] def flushAndGetResults(): List[Either[Exception, Any]] = {
-    flush()
-    val results = for (h <- handlers) yield {
+
+  private[redis] def readResults(): List[Either[Exception, Any]] = {
+    val results = for (h <- handlers.reverse) yield {
       try {
         Right(h())
       } catch {
@@ -158,18 +161,24 @@ class PipelineBuffer(parent: RedisClient) extends RedisCommand {
           Left(e)
       }
     }
-    results.toList
+    results
   }
 
   override def send[A](command: String, args: Seq[Any])(result: => A)(implicit format: Format): A = {
     write(Commands.multiBulk(command.getBytes("UTF-8") +: (args map (format.apply))))
-    handlers :+= (() => result)
+    handlers ::= (() => result)
+    handlersCount += 1
+    if(handlersCount % 256 == 0)
+      flush()
     null.asInstanceOf[A] // ugh... gotta find a better way
   }
 
   override def send[A](command: String)(result: => A): A = {
     write(Commands.multiBulk(List(command.getBytes("UTF-8"))))
-    handlers :+= (() => result)
+    handlers ::= (() => result)
+    handlersCount += 1
+    if(handlersCount % 256 == 0)
+      flush()
     null.asInstanceOf[A]
   }
 

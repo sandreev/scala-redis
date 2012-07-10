@@ -2,7 +2,9 @@ package com.redis.stress
 
 import com.redis.RedisCommand
 import org.scalatest.mock.MockitoSugar
-import com.redis.cluster.{RegexKeyTag, RedisCluster, NodeConfig, ConfigManager}
+import com.redis.cluster._
+import scala.Some
+import com.redis.cluster.NodeConfig
 
 
 object ClusterPipelineStressRunner extends App with MockitoSugar {

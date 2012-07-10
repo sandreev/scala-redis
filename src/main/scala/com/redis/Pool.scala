@@ -25,14 +25,7 @@ private [redis] class RedisClientFactory(host: String, port: Int) extends Poolab
 
 class RedisClientPool(host: String, port: Int) {
 
-  val poolConfig = new GenericObjectPool.Config()
-  poolConfig.minIdle = 1
-  poolConfig.maxIdle = 3
-  poolConfig.minEvictableIdleTimeMillis = 30000
-  poolConfig.timeBetweenEvictionRunsMillis = 30000
-
-  val pool = new GenericObjectPool(new RedisClientFactory(host, port), poolConfig)
-
+  val pool = new StackObjectPool(new RedisClientFactory(host, port), 2, 1)
 
   override def toString = host + ":" + String.valueOf(port)
 

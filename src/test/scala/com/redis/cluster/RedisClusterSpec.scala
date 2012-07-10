@@ -29,7 +29,9 @@ with MockitoSugar {
     val keyTag = Some(RegexKeyTag)
   }
 
-  override def beforeEach = {}
+  override protected def beforeAll() {
+    r.flushdb
+  }
 
   override def afterEach = r.flushdb
 

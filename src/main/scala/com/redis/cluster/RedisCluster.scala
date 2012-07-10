@@ -224,6 +224,16 @@ abstract class RedisCluster(configManager: ConfigManager)
     }
 
     def flushAndGetResults(): List[Either[Exception, Any]] = {
+      borrowedClients.foreach{
+        case (pool, PipelineEntry(_, pipe, _)) =>
+          try {
+            pipe.flush()
+          } catch {
+            case e => log.error("Error flushing pipe in node " + pool, e)
+          }
+      }
+
+
       val arr = new Array[Either[Exception, Any]](this.operationIdx)
 
       borrowedClients.foreach{
@@ -231,7 +241,7 @@ abstract class RedisCluster(configManager: ConfigManager)
           var errorOccurred = false
           try {
             val iter = indexes.iterator
-            pipe.flushAndGetResults().foreach {
+            pipe.readResults().foreach {
               arr(iter.next()) = _
             }
 

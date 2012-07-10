@@ -3,28 +3,59 @@ package com.redis
 import serialization.Parse
 import Parse.{Implicits => Parsers}
 
-private [redis] object Commands {
+private[redis] object Commands {
 
   // Response codes from the Redis server
-  val ERR    = '-'
-  val OK     = "OK".getBytes("UTF-8")
+  val ERR = '-'
+  val OK = "OK".getBytes("UTF-8")
   val QUEUED = "QUEUED".getBytes("UTF-8")
   val SINGLE = '+'
-  val BULK   = '$'
-  val MULTI  = '*'
-  val INT    = ':'
+  val BULK = '$'
+  val MULTI = '*'
+  val INT = ':'
 
-  val LS     = "\r\n".getBytes("UTF-8")
+  val LS = "\r\n".getBytes("UTF-8")
+
+  class ByteArrayBuffer(initSize: Int) {
+    var arr = new Array[Byte](initSize)
+    var count = 0
+
+    private def ensureCapacity(cap: Int) {
+      if (cap > arr.length) {
+        var newLen = arr.length
+        while (newLen < cap)
+          newLen *= 2
+
+        val newArr = new Array[Byte](newLen)
+        Array.copy(arr, 0, newArr, 0, count)
+        arr = newArr
+      }
+
+    }
+
+    def ++= (b: Array[Byte]) {
+      ensureCapacity(count + b.length)
+      Array.copy(b, 0, arr, count, b.length)
+      count += b.length
+    }
+
+    def result = {
+      var res = new Array[Byte](count)
+      Array.copy(arr,0,res,0,count)
+      res
+    }
+  }
 
   def multiBulk(args: Seq[Array[Byte]]): Array[Byte] = {
-    val b = new scala.collection.mutable.ArrayBuilder.ofByte
-    b ++= "*%d".format(args.size).getBytes
+    val b = new ByteArrayBuffer(128)
+    b ++= ("*" + args.size).getBytes
     b ++= LS
-    args foreach { arg =>
-      b ++= "$%d".format(arg.size).getBytes
-      b ++= LS
-      b ++= arg
-      b ++= LS
+    args foreach {
+      arg =>
+        b ++= ("$" + arg.length).getBytes
+        b ++= LS
+        b ++= arg
+        b ++= LS
     }
     b.result
   }
@@ -33,16 +64,19 @@ private [redis] object Commands {
 import Commands._
 
 case class RedisConnectionException(message: String) extends RuntimeException(message)
+
 case class RedisMultiExecException(message: String) extends RuntimeException(message)
 
-private [redis] trait Reply {
+private[redis] trait Reply {
 
   type Reply[T] = PartialFunction[(Char, Array[Byte]), T]
   type SingleReply = Reply[Option[Array[Byte]]]
   type MultiReply = Reply[Option[List[Option[Array[Byte]]]]]
 
   def readLine: Array[Byte]
+
   def readCounted(c: Int): Array[Byte]
+
   def reconnect: Boolean
 
   val integerReply: Reply[Option[Int]] = {
@@ -56,7 +90,7 @@ private [redis] trait Reply {
   }
 
   val bulkReply: SingleReply = {
-    case (BULK, s) => 
+    case (BULK, s) =>
       Parsers.parseInt(s) match {
         case -1 => None
         case l => {
@@ -79,9 +113,9 @@ private [redis] trait Reply {
     case (MULTI, str) =>
       Parsers.parseInt(str) match {
         case -1 => None
-        case n if n == handlers.size => 
+        case n if n == handlers.size =>
           Some(handlers.map(_.apply).toList)
-        case n => throw new Exception("Protocol error: Expected "+handlers.size+" results, but got "+n)
+        case n => throw new Exception("Protocol error: Expected " + handlers.size + " results, but got " + n)
       }
   }
 
@@ -99,24 +133,24 @@ private [redis] trait Reply {
   }
 
   def receive[T](pf: Reply[T]): T = readLine match {
-    case null => 
+    case null =>
       throw new RedisConnectionException("Connection dropped ..")
     case line =>
-      (pf orElse errReply) apply ((line(0).toChar,line.slice(1,line.length)))
+      (pf orElse errReply) apply ((line(0).toChar, line.slice(1, line.length)))
   }
 }
 
-private [redis] trait R extends Reply {
+private[redis] trait R extends Reply {
   def asString: Option[String] = receive(singleLineReply) map Parsers.parseString
 
-  def asBulk[T](implicit parse: Parse[T]): Option[T] =  receive(bulkReply) map parse
-  
+  def asBulk[T](implicit parse: Parse[T]): Option[T] = receive(bulkReply) map parse
+
   def asBulkWithTime[T](implicit parse: Parse[T]): Option[T] = receive(bulkReply orElse multiBulkReply) match {
     case x: Some[Array[Byte]] => x.map(parse(_))
     case _ => None
   }
 
-  def asInt: Option[Int] =  receive(integerReply orElse queuedReplyInt)
+  def asInt: Option[Int] = receive(integerReply orElse queuedReplyInt)
 
   def asBoolean: Boolean = receive(integerReply orElse singleLineReply) match {
     case Some(n: Int) => n > 0
@@ -130,8 +164,8 @@ private [redis] trait R extends Reply {
 
   def asList[T](implicit parse: Parse[T]): Option[List[Option[T]]] = receive(multiBulkReply).map(_.map(_.map(parse)))
 
-  def asListPairs[A,B](implicit parseA: Parse[A], parseB: Parse[B]): Option[List[Option[(A,B)]]] =
-    receive(multiBulkReply).map(_.grouped(2).flatMap{
+  def asListPairs[A, B](implicit parseA: Parse[A], parseB: Parse[B]): Option[List[Option[(A, B)]]] =
+    receive(multiBulkReply).map(_.grouped(2).flatMap {
       case List(Some(a), Some(b)) => Iterator.single(Some((parseA(a), parseB(b))))
       case _ => Iterator.single(None)
     }.toList)
