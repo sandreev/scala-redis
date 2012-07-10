@@ -72,13 +72,15 @@ with BeforeAndAfterAll {
 
   describe("pipeline4") {
     it("should execute commands before non-connection exception ") {
+      object SomeAppException extends Exception
+
       val res = r.pipeline {
         p =>
           p.set("a", "abc")
-          throw new Exception("want to discard")
+          throw SomeAppException
       }
 
-      res.right.get should equal(List(Right(true)))
+      res.right.get should equal(List(Right(true), Left(SomeAppException)))
       res.left.toOption.isEmpty should equal(true)
 
       r.get("a") should equal(Some("abc"))
