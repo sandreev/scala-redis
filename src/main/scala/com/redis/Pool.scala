@@ -1,8 +1,6 @@
 package com.redis
 
 import org.apache.commons.pool._
-import org.apache.commons.pool.impl._
-import java.io.IOException
 
 
 private [redis] class RedisClientFactory(host: String, port: Int) extends PoolableObjectFactory {
@@ -24,14 +22,12 @@ private [redis] class RedisClientFactory(host: String, port: Int) extends Poolab
 }
 
 class RedisClientPool(host: String, port: Int) {
-
-  //val pool = new StackObjectPool(new RedisClientFactory(host, port), 2, 1)
   val pool = new SimplePool[RedisClient](new RedisClientFactory(host, port), 1, 2)
 
   override def toString = host + ":" + String.valueOf(port)
 
   def withClient[T](body: RedisClient => T): T = {
-    val client = pool.borrowObject.asInstanceOf[RedisClient]
+    val client = pool.borrowObject
     var ioErrorOccurred = false
     try {
       body(client)
@@ -46,6 +42,8 @@ class RedisClientPool(host: String, port: Int) {
         pool.returnObject(client)
     }
   }
+
+
 
   // close pool & free resources
   def close = pool.close

@@ -26,7 +26,7 @@ class PatternsSpec extends Spec
   }
 
   override def afterAll = {
-    clients.withClient{ client => client.disconnect }
+    //clients.withClient{ client => client.disconnect }
     clients.close
   }
 

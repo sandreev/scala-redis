@@ -6,6 +6,7 @@ import org.scalatest.BeforeAndAfterAll
 import org.scalatest.matchers.ShouldMatchers
 import org.scalatest.junit.JUnitRunner
 import org.junit.runner.RunWith
+import scala.Either.RightProjection
 
 
 @RunWith(classOf[JUnitRunner])
@@ -93,10 +94,37 @@ with BeforeAndAfterAll {
         p =>
           p.set("a", "abc")
           throw new RedisConnectionException("want to discard")
+
       }
 
       res.right.toOption.isEmpty should equal(true)
       res.left.get.isInstanceOf[RedisConnectionException] should equal(true)
+    }
+  }
+
+  describe("pipeline6") {
+    it("should continue reading results after non-io exception ") {
+      r.flushdb
+      r.reconnect
+
+      val res = r.pipeline {
+        p =>
+          p.set("a", "abc")
+          p.rename("a", "a")
+          p.set("b", "abcd")
+      }
+
+      res.right.toOption.isEmpty should equal(false)
+
+      res.right.get.zip(List(
+        (v: Either[Exception, Any]) => v.right.get should equal(true),
+        (v: Either[Exception, Any]) => v.left.get.isInstanceOf[RedisBusinessException] should equal(true),
+        (v: Either[Exception, Any]) => v.right.get should equal(true)
+      )).foreach {
+        case (v, pred) => pred(v)
+      }
+
+
     }
   }
 

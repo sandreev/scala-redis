@@ -65,6 +65,10 @@ import Commands._
 
 case class RedisConnectionException(message: String) extends RuntimeException(message)
 
+case class RedisBusinessException(message: String) extends RuntimeException(message)
+
+case class RedisProtocolException(message: String) extends RuntimeException(message)
+
 case class RedisMultiExecException(message: String) extends RuntimeException(message)
 
 private[redis] trait Reply {
@@ -77,7 +81,7 @@ private[redis] trait Reply {
 
   def readCounted(c: Int): Array[Byte]
 
-  def reconnect: Boolean
+
 
   val integerReply: Reply[Option[Int]] = {
     case (INT, s) => Some(Parsers.parseInt(s))
@@ -120,8 +124,8 @@ private[redis] trait Reply {
   }
 
   val errReply: Reply[Nothing] = {
-    case (ERR, s) => reconnect; throw new Exception(Parsers.parseString(s))
-    case x => reconnect; throw new Exception("Protocol error: Got " + x + " as initial reply byte")
+    case (ERR, s) => throw new RedisBusinessException(Parsers.parseString(s))
+    case x => throw new RedisProtocolException("Protocol error: Got " + x + " as initial reply byte")
   }
 
   def queuedReplyInt: Reply[Option[Int]] = {
