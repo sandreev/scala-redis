@@ -17,19 +17,9 @@ class HashRing[T](val cluster: Map[String, T], val ring: Array[(Long, T)], repli
     val crc = calculateChecksum(key)
     ringNode(ring, crc)
   }
-
-  def getLookupInfo(key: Array[Byte]) = {
-    val crc = calculateChecksum(key)
-    val (pos, actualPos) = ringLookupInfo(ring, crc)
-    LookupInfo(crc, pos, actualPos)
-  }
 }
 
 object HashRing {
-  case class LookupInfo(crc: Long, ringPosition: Int, actualNodeIdx: Int) {
-    override def toString = "[crc=" + crc + ", positionCandidate=" + (- ringPosition - 1) + ", actualRingPosition=" + actualNodeIdx + "]"
-  }
-
   def entryComparator[T] = new util.Comparator[(Long, T)] {
     def compare(o1: (Long, T), o2: (Long, T)) = o1._1.compareTo(o2._1)
   }
@@ -58,19 +48,6 @@ object HashRing {
       case lessMin if lessMin == -1 => ring(0)._2
       case candidate => ring(- candidate - 2)._2
     }
-
-  }
-
-
-  def ringLookupInfo[T](ring: Array[(Long, T)], crc: Long) = {
-    val pos = util.Arrays.binarySearch(ring, (crc, null.asInstanceOf[T]), entryComparator[T]);
-    val actualPos =   pos match {
-      case found if found >= 0 => found
-      case greaterMax if greaterMax == - ring.length - 1 => ring.length - 1
-      case lessMin if lessMin == -1 => 0
-      case candidate => - candidate - 2
-    }
-    (pos, actualPos)
 
   }
 }
