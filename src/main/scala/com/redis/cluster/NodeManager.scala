@@ -8,4 +8,5 @@ trait NodeManager {
   def withNode[T](key: Any)(body: RedisCommand => T)(implicit format: Format): T
   def onAllConns[T](body: RedisClient => T): Iterable[T]
   def groupByNodes[T](key: Any, keys: Any*)(body: (RedisCommand, Seq[Any]) => T)(implicit format: Format): Iterable[T]
+
 }

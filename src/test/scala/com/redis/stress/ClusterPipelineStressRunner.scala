@@ -17,8 +17,11 @@ object ClusterPipelineStressRunner extends App with MockitoSugar {
       "2" -> NodeConfig("localhost", 6380),
       "3" -> NodeConfig("localhost", 6381)))
 
+
+
   val r = new RedisCluster(conf) {
     val keyTag = Some(RegexKeyTag)
+    override def isLookupLogEnabled(key: Any) = key.toString.contains("22")
   }
 
   abstract class Runner(val name: String) extends PipelineStress {

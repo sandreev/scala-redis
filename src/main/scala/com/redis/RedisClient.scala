@@ -1,6 +1,7 @@
 package com.redis
 
 import serialization.Format
+import java.io.IOException
 
 object RedisClient {
 
@@ -21,23 +22,42 @@ object RedisClient {
 }
 
 trait Redis extends IO with Protocol {
-  def send[A](command: String, args: Seq[Any])(result: => A)(implicit format: Format): A = {
-    write(Commands.multiBulk(command.getBytes("UTF-8") +: (args map (format.apply))))
-    flush()
-    result
-  }
+  def send[A](command: String, args: Seq[Any])(result: => A)(implicit format: Format): A
 
-  def send[A](command: String)(result: => A): A = {
-    write(Commands.multiBulk(List(command.getBytes("UTF-8"))))
-    flush()
-    result
-  }
+  def send[A](command: String)(result: => A): A
 
   def cmd(args: Seq[Array[Byte]]) = Commands.multiBulk(args)
 
   protected def flattenPairs(in: Iterable[Product2[Any, Any]]): List[Any] =
     in.iterator.flatMap(x => Iterator(x._1, x._2)).toList
 }
+
+trait SyncCommand {
+  self: IO with Log =>
+
+  private def syncCommand[A](command: Array[Byte], attemptsRemaining: Int)(result: () => A)(implicit format: Format): A = {
+    try {
+      write(command)
+      flush()
+      result()
+    } catch {
+      case e if (e.isInstanceOf[RedisConnectionException] || e.isInstanceOf[IOException]) && attemptsRemaining > 1 =>
+        warn("Got IO error while performing operation - reconnecting", e)
+        reconnect
+        syncCommand(command, attemptsRemaining - 1)(result)
+    }
+  }
+
+  def send[A](command: String, args: Seq[Any])(result: => A)(implicit format: Format): A = {
+    syncCommand(Commands.multiBulk(command.getBytes("UTF-8") +: (args map (format.apply))), 2)(() => result)
+  }
+
+  def send[A](command: String)(result: => A): A = {
+    syncCommand(Commands.multiBulk(List(command.getBytes("UTF-8"))), 2)(() => result)
+  }
+
+}
+
 
 trait RedisCommand extends Redis
 with Operations
@@ -55,12 +75,11 @@ trait Pipeline {
 
 class RedisClient(override val host: String, override val port: Int)
   extends RedisCommand
+  with SyncCommand
   with Pipeline
   with PubSub {
 
   connect
-
-  def this() = this("localhost", 6379)
 
   override def toString = host + ":" + String.valueOf(port)
 
@@ -89,7 +108,7 @@ class RedisClient(override val host: String, override val port: Int)
 
 
     ex match {
-      case Some(e @ RedisConnectionException(_)) => Left(e)
+      case Some(e@RedisConnectionException(_)) => Left(e)
       case other =>
         try {
           pipe.flush()
@@ -132,13 +151,9 @@ class RedisClient(override val host: String, override val port: Int)
     // TODO: Find a better abstraction
     override def connected = parent.connected
 
-    override def connect = parent.connect
-
-    override def reconnect = parent.reconnect
+    override def connect = throw new UnsupportedOperationException("cannot initiate connection within transaction")
 
     override def disconnect = parent.disconnect
-
-    override def clearFd = parent.clearFd
 
     override def write(data: Array[Byte]) = parent.write(data)
 
@@ -171,10 +186,11 @@ class PipelineBuffer(parent: RedisClient) extends RedisCommand {
   }
 
   override def send[A](command: String, args: Seq[Any])(result: => A)(implicit format: Format): A = {
+
     write(Commands.multiBulk(command.getBytes("UTF-8") +: (args map (format.apply))))
-    handlers ::= (() => result)
+    handlers ::= (() => result    )
     handlersCount += 1
-    if(handlersCount % 256 == 0)
+    if (handlersCount % 256 == 0)
       flush()
     null.asInstanceOf[A] // ugh... gotta find a better way
   }
@@ -183,7 +199,7 @@ class PipelineBuffer(parent: RedisClient) extends RedisCommand {
     write(Commands.multiBulk(List(command.getBytes("UTF-8"))))
     handlers ::= (() => result)
     handlersCount += 1
-    if(handlersCount % 256 == 0)
+    if (handlersCount % 256 == 0)
       flush()
     null.asInstanceOf[A]
   }
@@ -194,13 +210,9 @@ class PipelineBuffer(parent: RedisClient) extends RedisCommand {
   // TODO: Find a better abstraction
   override def connected = parent.connected
 
-  override def connect = parent.connect
-
-  override def reconnect = parent.reconnect
+  override def connect = throw new UnsupportedOperationException("Cannot initiate connection within pipeline")
 
   override def disconnect = parent.disconnect
-
-  override def clearFd = parent.clearFd
 
   override def write(data: Array[Byte]) = parent.write(data)
 

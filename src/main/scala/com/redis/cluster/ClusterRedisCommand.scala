@@ -3,7 +3,7 @@ package com.redis.cluster
 import com.redis.{RedisClient, RedisCommand}
 import com.redis.serialization.{Parse, Format}
 
-trait ClusterRedisCommand extends RedisCommand {
+trait ClusterRedisCommand extends RedisCommand with ProhibitedDirectInteraction {
   self: NodeManager =>
   /**
    * Operations

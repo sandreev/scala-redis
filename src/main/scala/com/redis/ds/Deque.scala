@@ -35,6 +35,7 @@ trait Deque[A] {
 import com.redis.ListOperations
 import com.redis.serialization._
 import Parse.Implicits._
+import com.redis.SyncCommand
 
 abstract class RedisDeque[A](val blocking: Boolean = false, val timeoutInSecs: Int = 0)(implicit private val format: Format, private val parse: Parse[A])
   extends Deque[A] { self: ListOperations =>
@@ -77,7 +78,7 @@ import com.redis.{Redis, ListOperations}
 
 class RedisDequeClient(val h: String, val p: Int) {
   def getDeque[A](k: String, blocking: Boolean = false, timeoutInSecs: Int = 0)(implicit format: Format, parse: Parse[A]) =
-    new RedisDeque(blocking, timeoutInSecs)(format, parse) with ListOperations with Redis {
+    new RedisDeque(blocking, timeoutInSecs)(format, parse) with ListOperations with Redis with SyncCommand {
       val host = h
       val port = p
       val key = k
