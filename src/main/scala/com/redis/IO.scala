@@ -49,53 +49,68 @@ trait IO extends Log {
   }
 
   // Wrapper for the socket write operation.
-  def withSocket(op: OutputStream => Unit) = op(out)
+  def withOutput[T](op: OutputStream => T) = try {
+    op(out)
+  } catch {
+    case e: IOException => throw new RedisConnectionException("Error writing to socket", e)
+  }
+
+
+  def withInput[T](op: InputStream => T) = try {
+    op(in)
+  } catch {
+    case e: IOException => throw new RedisConnectionException("Error reading from socket", e)
+  }
+
 
   // Writes data to a socket using the specified block.
   def write(data: Array[Byte]) = {
     ifDebug("C: " + parseStringSafe(data))
-    withSocket(_.write(data))
+    withOutput(_.write(data))
   }
 
   def flush() {
     ifDebug("C: flush")
-    withSocket(_.flush)
+    withOutput(_.flush)
   }
 
 
   private val crlf = List(13, 10)
 
-  def readLine: Array[Byte] = {
-    var delimiter = crlf
-    var found: List[Int] = Nil
-    var build = new scala.collection.mutable.ArrayBuilder.ofByte
-    while (delimiter != Nil) {
-      val next = in.read
-      if (next < 0) return null
-      if (next == delimiter.head) {
-        found ::= delimiter.head
-        delimiter = delimiter.tail
-      } else {
-        if (found != Nil) {
-          delimiter = crlf
-          build ++= found.reverseMap(_.toByte)
-          found = Nil
+  def readLine: Array[Byte] = withInput {
+    in =>
+      var delimiter = crlf
+      var found: List[Int] = Nil
+      var build = new scala.collection.mutable.ArrayBuilder.ofByte
+
+      while (delimiter != Nil) {
+        val next = in.read
+        if (next < 0) return null
+        if (next == delimiter.head) {
+          found ::= delimiter.head
+          delimiter = delimiter.tail
+        } else {
+          if (found != Nil) {
+            delimiter = crlf
+            build ++= found.reverseMap(_.toByte)
+            found = Nil
+          }
+          build += next.toByte
         }
-        build += next.toByte
       }
-    }
-    build.result
+      build.result
   }
 
-  def readCounted(count: Int): Array[Byte] = {
-    val arr = new Array[Byte](count)
-    var cur = 0
-    while (cur < count) {
-      val bytesRead = in.read(arr, cur, count - cur)
-      if (bytesRead == 0)
-        return null
-      cur += bytesRead
-    }
-    arr
+  def readCounted(count: Int): Array[Byte] = withInput {
+    in =>
+      val arr = new Array[Byte](count)
+      var cur = 0
+      while (cur < count) {
+        val bytesRead = in.read(arr, cur, count - cur)
+        if (bytesRead == 0)
+          return null
+        cur += bytesRead
+      }
+      arr
   }
 }
