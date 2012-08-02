@@ -216,6 +216,37 @@ trait ClusterRedisCommand extends RedisCommand with ProhibitedDirectInteraction 
   override def zcount(key: Any, min: Double = Double.NegativeInfinity, max: Double = Double.PositiveInfinity, minInclusive: Boolean = true, maxInclusive: Boolean = true)(implicit format: Format): Option[Int] =
     withNode(key)(_.zcount(key, min, max, minInclusive, maxInclusive))
 
+
+  override def zrangebyscoreWithScore[A](key: Any, min: Double, minInclusive: Boolean, max: Double, maxInclusive: Boolean, limit: Option[(Int, Int)])(implicit format: Format, parse: Parse[A]): Option[List[(A, Double)]] =
+    withNode(key)(_.zrangebyscoreWithScore(key,min,minInclusive,max,maxInclusive,limit))
+
+  // ZRANK
+  override def zrank(key: Any, member: Any, reverse: Boolean)(implicit format: Format): Option[Int] =
+    withNode(key)(_.zrank(key,member, reverse))
+
+  // ZREMRANGEBYRANK
+  override def zremrangebyrank(key: Any, start: Int, end: Int)(implicit format: Format) =
+    withNode(key)(_.zremrangebyrank(key, start, end))
+
+  // ZREMRANGEBYSCORE
+  override def zremrangebyscore(key: Any, start: Double, end: Double)(implicit format: Format) =
+    withNode(key)(_.zremrangebyscore(key,start,end))
+
+  // ZUNION
+  override def zunionstore(dstKey: Any, keys: Iterable[Any], aggregate: Aggregate)(implicit format: Format) =
+    inSameNode(dstKey :: keys.toList: _*)(_.zunionstore(dstKey, keys, aggregate))
+
+  override def zunionstoreWeighted(dstKey: Any, kws: Iterable[Product2[Any, Double]], aggregate: Aggregate)(implicit format: Format) =
+    inSameNode(dstKey :: kws.map(_._1).toList: _*)(_.zunionstoreWeighted(dstKey, kws, aggregate))
+
+  // ZINTERSTORE
+  override def zinterstore(dstKey: Any, keys: Iterable[Any], aggregate: Aggregate)(implicit format: Format) =
+    inSameNode(dstKey :: keys.toList: _*)(_.zinterstore(dstKey, keys, aggregate))
+
+
+  override def zinterstoreWeighted(dstKey: Any, kws: Iterable[Product2[Any, Double]], aggregate: Aggregate)(implicit format: Format) =
+    inSameNode(dstKey :: kws.map(_._1).toList: _*)(_.zinterstoreWeighted(dstKey, kws, aggregate))
+
   /**
    * HashOperations
    */
