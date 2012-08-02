@@ -108,7 +108,7 @@ class RedisClient(override val host: String, override val port: Int)
 
 
     ex match {
-      case Some(e@RedisConnectionException(_)) => Left(e)
+      case Some(e : RedisConnectionException) => Left(e)
       case other =>
         try {
           pipe.flush()

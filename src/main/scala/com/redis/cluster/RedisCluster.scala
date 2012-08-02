@@ -274,7 +274,7 @@ abstract class RedisCluster(configManager: ConfigManager)
     }
 
     ex match {
-      case Some(e @ RedisConnectionException(_)) => Left(e)
+      case Some(e : RedisConnectionException) => Left(e)
       case _ => Right(pipe.flushAndGetResults())
     }
   }
