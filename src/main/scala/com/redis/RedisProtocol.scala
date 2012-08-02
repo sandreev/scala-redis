@@ -2,6 +2,7 @@ package com.redis
 
 import serialization.Parse
 import Parse.{Implicits => Parsers}
+import java.io.IOException
 
 private[redis] object Commands {
 
@@ -63,7 +64,13 @@ private[redis] object Commands {
 
 import Commands._
 
-case class RedisConnectionException(message: String) extends RuntimeException(message)
+class RedisConnectionException (message: String, cause: Throwable) extends RuntimeException(message: String) {
+  if (cause != null)
+    initCause(cause)
+
+  def this(message: String) = this(message, null)
+
+}
 
 case class RedisBusinessException(message: String) extends RuntimeException(message)
 
