@@ -84,7 +84,7 @@ trait Operations { self: Redis =>
   // QUIT
   // exits the server.
   def quit: Boolean =
-    send("QUIT")(disconnect)
+    send("QUIT")(asBoolean)
   
   // AUTH
   // auths with the server.
