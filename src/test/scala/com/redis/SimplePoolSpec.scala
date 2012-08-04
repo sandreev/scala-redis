@@ -1,33 +1,38 @@
 package com.redis
 
-import java.util.concurrent.atomic.{AtomicInteger, AtomicBoolean}
+import java.util.concurrent.atomic.AtomicInteger
 import org.apache.commons.pool.PoolableObjectFactory
 import org.scalatest.WordSpec
 import org.scalatest.matchers.MustMatchers
-import java.util.concurrent.CyclicBarrier
+import java.util.concurrent.{ConcurrentLinkedQueue, CyclicBarrier}
 
 class SimplePoolSpec extends WordSpec with MustMatchers {
 
   class PooledObject(i: Int) extends Function0[String] {
-    val closed = new AtomicBoolean(false)
+    val closed = new AtomicInteger()
 
     def apply() = {
-      if (closed.get)
+      if (isClosed)
         throw new Exception("Resource closed")
       "OK" + i
     }
 
     def close() {
-      closed.set(true)
+      closed.incrementAndGet()
     }
+
+    def isClosed = closed.get() > 0
   }
 
   class TestObjectFactory extends PoolableObjectFactory {
     val i = new AtomicInteger()
+    val createdObjects = new ConcurrentLinkedQueue[PooledObject]()
 
     def makeObject() = {
       Thread.sleep(16)
-      new PooledObject(i.incrementAndGet())
+      val obj = new PooledObject(i.incrementAndGet())
+      createdObjects.add(obj)
+      obj
     }
 
     def destroyObject(obj: Any) {
@@ -91,7 +96,7 @@ class SimplePoolSpec extends WordSpec with MustMatchers {
       pool.returnObject(obj1)
       pool.returnObject(obj2)
       pool.returnObject(obj3)
-      obj3.closed.get() must equal(true)
+      obj3.isClosed must equal(true)
       obj1 = pool.borrowObject()
       obj2 = pool.borrowObject()
       obj3 = pool.borrowObject()
@@ -106,7 +111,7 @@ class SimplePoolSpec extends WordSpec with MustMatchers {
       factory.i.get() must equal(1)
       var obj1 = pool.borrowObject()
       pool.invalidateObject(obj1)
-      obj1.closed.get() must equal(true)
+      obj1.isClosed must equal(true)
       obj1 = pool.borrowObject()
       obj1() must equal("OK2")
     }
@@ -143,5 +148,53 @@ class SimplePoolSpec extends WordSpec with MustMatchers {
     }
   }
 
+  "pool closing" should {
+    "be executed only once" in {
+      val factory = new TestObjectFactory
+      val pool = new SimplePool[PooledObject](factory, 8, 8)
 
+      val nThreads = 32
+      val barrier = new CyclicBarrier(nThreads)
+
+      class CloseThread extends Thread {
+        override def run() {
+          barrier.await()
+          pool.close()
+        }
+      }
+
+      val threads = (1 to nThreads).map{
+        i =>
+          val t = new CloseThread
+          t.start()
+          t
+      }
+      threads.foreach(_.join)
+
+      import scala.collection.JavaConversions._
+      factory.createdObjects.forall(_.closed.get() == 1) must be(true)
+    }
+
+    "prohibit borrowing on closed pool" in {
+      val factory = new TestObjectFactory
+      val pool = new SimplePool[PooledObject](factory, 8, 8)
+      pool.close()
+
+      intercept[IllegalStateException]{
+        pool.borrowObject()
+      }
+    }
+
+    "destroy object if returned to closed pool" in {
+      val factory = new TestObjectFactory
+      val pool = new SimplePool[PooledObject](factory, 1, 8)
+      val obj = pool.borrowObject()
+
+      obj.isClosed must be(false)
+      pool.close()
+      obj.isClosed must be(false)
+      pool.returnObject(obj)
+      obj.isClosed must be(true)
+    }
+  }
 }

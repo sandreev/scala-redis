@@ -26,7 +26,6 @@ class PoolSpec extends Spec
   }
 
   override def afterAll = {
-    clients.withClient{ client => client.disconnect }
     clients.close
   }
 
@@ -129,6 +128,14 @@ println(len)
       val (s, o, r) = incrLoad(10000)
       println("2000000 incr operations: elapsed = " + s + " per sec = " + o)
       r.size should equal(100)
+    }
+  }
+
+  describe("pool closing") {
+    it("should close correctly") {
+      val pool = new RedisClientPool("localhost", 6379)
+      pool.withClient(_.get("non-existing-key"))
+      pool.close
     }
   }
 }
