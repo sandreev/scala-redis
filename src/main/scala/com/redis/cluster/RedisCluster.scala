@@ -185,7 +185,7 @@ abstract class RedisCluster(configManager: ConfigManager)
 
   /* Pipeline */
 
-  private class MultiNodePipeline(parent: RedisCluster) extends ClusterRedisCommand with NodeManager {
+  private class MultiNodePipeline(parent: RedisCluster) extends ClusterRedisCommand with NodeManager with PipelineSpecials {
     val host = parent.host
     val port = parent.port
     val hr: HashRing[RedisClientPool] = parent.hr.ringRef.get()
