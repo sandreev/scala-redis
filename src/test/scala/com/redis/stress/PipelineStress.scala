@@ -19,7 +19,7 @@ trait PipelineStress {
 
   def onlyIncrs(r: RedisCommand, nOps: Int)  {
     for (i <- 1 to nOps) {
-      r.hincrby("key{" + (i % 100) + "}" + (i % 100),"field", i)
+      r.hincrby("key" + (i % 100),"field", i)
     }
   }
 

@@ -73,10 +73,6 @@ abstract class RedisCluster(configManager: ConfigManager)
 
 
   val log = LoggerFactory.getLogger(getClass)
-  val lookupLog = LoggerFactory.getLogger("com.redis.cluster.nodelookup")
-
-  def isLookupLogEnabled(key: Any) = false
-
 
   // abstract val
   val keyTag: Option[KeyTag]
@@ -147,34 +143,22 @@ abstract class RedisCluster(configManager: ConfigManager)
     }
   })
 
-  private[redis] def poolForKey(hr: HashRing[RedisClientPool], key: Any)(implicit format: Format): RedisClientPool = {
+  private[redis] def poolForKey(hr: HashRing[RedisClientPool],  key: Any)(implicit format: Format): RedisClientPool = {
     val bKey = format(key)
-    val tag = keyTag.flatMap(_.tag(bKey))
-    val node = hr.getNode(tag.getOrElse(bKey))
-
-    if (isLookupLogEnabled(key) && lookupLog.isDebugEnabled) {
-      val keyString = key.toString
-      val ringLookupInfo = hr.getLookupInfo(tag.getOrElse(bKey))
-      tag match {
-        case Some(arr) => lookupLog.debug("lookup: " + keyString + " => tag " + new String(arr) + ", ringData " + ringLookupInfo + ", node " + node)
-        case _ => lookupLog.debug("lookup: " + keyString + " => ringData " + ringLookupInfo + ", node " + node)
-      }
-    }
-
-
-    node
+    hr.getNode(keyTag.flatMap(_.tag(bKey)).getOrElse(bKey))
   }
 
 
+
   def onAllConns[T](body: RedisClient => T) =
-    hr.cluster.values.map(_.withClient(body))
+    hr.cluster.values.map(_.withClient (body))
 
   def close() {
     hr.cluster.values.foreach(_.close)
   }
 
   private def poolForKeys(hr: HashRing[RedisClientPool], keys: Any*) = {
-    require(!keys.isEmpty, "Cannot determine node for empty keys set")
+    require(!keys.isEmpty,"Cannot determine node for empty keys set")
     val nodes = keys.toList.map(poolForKey(hr, _))
     nodes.forall(_ eq nodes.head) match {
       case true => nodes.head // all nodes equal
@@ -193,7 +177,7 @@ abstract class RedisCluster(configManager: ConfigManager)
   def groupByNodes[T](key: Any, keys: Any*)(body: (RedisCommand, Seq[Any]) => T)(implicit format: Format) = {
     val ring = hr.ringRef.get
     val keyList = key :: keys.toList
-    keyList.groupBy(key => poolForKey(ring, key)).toSeq.map {
+    keyList.groupBy(key => ring.getNode(keyTag.flatMap(_.tag(format(key))).getOrElse(format(key)))).toSeq.map {
       case (pool, keys) =>
         pool.withClient(body(_, keys))
     }
@@ -240,7 +224,7 @@ abstract class RedisCluster(configManager: ConfigManager)
     }
 
     def flushAndGetResults(): List[Either[Exception, Any]] = {
-      borrowedClients.foreach {
+      borrowedClients.foreach{
         case (pool, PipelineEntry(_, pipe, _)) =>
           try {
             pipe.flush()
@@ -252,7 +236,7 @@ abstract class RedisCluster(configManager: ConfigManager)
 
       val arr = new Array[Either[Exception, Any]](this.operationIdx)
 
-      borrowedClients.foreach {
+      borrowedClients.foreach{
         case (pool, PipelineEntry(client, pipe, indexes)) =>
           var errorOccurred = false
           try {
@@ -264,7 +248,7 @@ abstract class RedisCluster(configManager: ConfigManager)
           } catch {
             case e: Exception =>
               val errReport = Left(e)
-              indexes.foreach {
+              indexes.foreach{
                 arr(_) = errReport
               }
               errorOccurred = true
@@ -290,7 +274,7 @@ abstract class RedisCluster(configManager: ConfigManager)
     }
 
     ex match {
-      case Some(e@RedisConnectionException(_)) => Left(e)
+      case Some(e : RedisConnectionException) => Left(e)
       case _ => Right(pipe.flushAndGetResults())
     }
   }
