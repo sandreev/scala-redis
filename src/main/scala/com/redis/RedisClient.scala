@@ -70,7 +70,7 @@ with HashOperations
 
 
 trait Pipeline {
-  def pipeline(f: RedisCommand => Any): Either[Exception, List[Either[Exception, Any]]]
+  def pipeline(f: RedisCommand with Pipeline => Any): Either[Exception, List[Either[Exception, Any]]]
 }
 
 class RedisClient(override val host: String, override val port: Int)
@@ -96,7 +96,7 @@ class RedisClient(override val host: String, override val port: Int)
     }
   }
 
-  def pipeline(f: RedisCommand => Any): Either[Exception, List[Either[Exception, Any]]] = {
+  def pipeline(f: RedisCommand with Pipeline => Any): Either[Exception, List[Either[Exception, Any]]] = {
     val pipe = pipelineBuffer
 
     val ex = try {
@@ -168,7 +168,7 @@ class RedisClient(override val host: String, override val port: Int)
 
 }
 
-class PipelineBuffer(parent: RedisClient) extends RedisCommand {
+class PipelineBuffer(parent: RedisClient) extends RedisCommand with Pipeline {
   var handlers: List[() => Any] = List.empty
   var handlersCount = 0
 
@@ -202,6 +202,12 @@ class PipelineBuffer(parent: RedisClient) extends RedisCommand {
     if (handlersCount % 256 == 0)
       flush()
     null.asInstanceOf[A]
+  }
+
+
+  def pipeline(f: RedisCommand with Pipeline => Any) = {
+    f(this)
+    Left(new IllegalStateException("Results of nested pipeline"))
   }
 
   val host = parent.host

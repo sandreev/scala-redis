@@ -185,7 +185,7 @@ abstract class RedisCluster(configManager: ConfigManager)
 
   /* Pipeline */
 
-  private class MultiNodePipeline(parent: RedisCluster) extends ClusterRedisCommand with NodeManager with PipelineSpecials {
+  private class MultiNodePipeline(parent: RedisCluster) extends ClusterRedisCommand with NodeManager with PipelineSpecials with Pipeline{
     val host = parent.host
     val port = parent.port
     val hr: HashRing[RedisClientPool] = parent.hr.ringRef.get()
@@ -261,9 +261,14 @@ abstract class RedisCluster(configManager: ConfigManager)
       }
       arr.toList
     }
+
+    def pipeline(f: (RedisCommand with Pipeline) => Any) = {
+      f(this)
+      Left(new IllegalStateException("Results of nested sharded pipeline"))
+    }
   }
 
-  def pipeline(f: RedisCommand => Any) = {
+  def pipeline(f: RedisCommand with Pipeline => Any) = {
     val pipe = new MultiNodePipeline(this)
 
     val ex = try {
