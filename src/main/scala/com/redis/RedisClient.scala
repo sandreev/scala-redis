@@ -73,6 +73,13 @@ trait Pipeline {
   def pipeline(f: RedisCommand with Pipeline => Any): Either[Exception, List[Either[Exception, Any]]]
 }
 
+object Pipeline {
+  def getFirstError(results: Either[Exception, List[Either[Exception, Any]]]) = results match {
+    case Left(e) => Some(e)
+    case Right(list) => list.find(_.isLeft).map(_.left.get)
+  }
+}
+
 class RedisClient(override val host: String, override val port: Int)
   extends RedisCommand
   with SyncCommand
