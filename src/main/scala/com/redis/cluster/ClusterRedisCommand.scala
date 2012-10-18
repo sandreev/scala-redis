@@ -274,5 +274,5 @@ trait ClusterRedisCommand extends RedisCommand with ProhibitedDirectInteraction 
 
   override def hsetnx(key: Any, field: Any, value: Any)(implicit format: Format): Boolean = withNode(key)(_.hsetnx(key, field, value))
 
-
+  override def watch(keys: Any*)(implicit format: Format): Boolean = inSameNode(keys: _*)(_.watch(keys: _*))
 }

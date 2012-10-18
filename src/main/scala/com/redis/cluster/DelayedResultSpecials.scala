@@ -3,7 +3,7 @@ package com.redis.cluster
 import com.redis.serialization.{Parse, Format}
 import com.redis.RedisCommand
 
-trait PipelineSpecials extends ClusterRedisCommand {
+trait DelayedResultSpecials extends ClusterRedisCommand {
   self: NodeManager =>
 
   override def del(key: Any, keys: Any*)(implicit format: Format) = {

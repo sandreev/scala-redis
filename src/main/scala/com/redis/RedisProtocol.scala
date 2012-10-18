@@ -76,8 +76,6 @@ case class RedisBusinessException(message: String) extends RuntimeException(mess
 
 case class RedisProtocolException(message: String) extends RuntimeException(message)
 
-case class RedisMultiExecException(message: String) extends RuntimeException(message)
-
 private[redis] trait Reply {
 
   type Reply[T] = PartialFunction[(Char, Array[Byte]), T]

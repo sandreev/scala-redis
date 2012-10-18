@@ -2,6 +2,7 @@ package com.redis
 
 import serialization.Format
 import java.io.IOException
+import annotation.tailrec
 
 object RedisClient {
 
@@ -68,6 +69,52 @@ with SetOperations
 with SortedSetOperations
 with HashOperations
 
+trait Transactional {
+  self: RedisCommand =>
+  def transaction(f: RedisCommand => Any): Either[Exception, Option[List[Any]]]
+
+  def stmLike[T](precondition: RedisCommand => (Boolean, T))(action: (RedisCommand,T) => Any): Either[Exception, Option[List[Any]]] = {
+    def functionalPrecondition(r: RedisCommand): Either[Exception, (Boolean, T)] = try {
+      Right(precondition(r))
+    } catch {
+      case e: Exception =>
+        Left(e)
+    }
+
+    functionalPrecondition(this) match {
+      case Right((true, v)) =>
+        transaction(action(_, v)) match {
+          case Right(None) => stmLike(precondition)(action)
+          case other => other
+        }
+      case Right((false, _)) =>
+        Right(None)
+      case Left(e) =>
+        Left(e)
+    }
+  }
+}
+
+trait RawTransactional {
+  def openTx()
+  def commit(): Option[List[Any]]
+  def rollback()
+}
+
+trait DefaultTransactional extends Transactional {
+  self: RedisCommand with RawTransactional =>
+
+  def transaction(f: (RedisCommand) => Any) = try {
+    openTx()
+    f(this)
+    Right(commit())
+  } catch {
+    case e: Exception =>
+      rollback()
+      Left(e)
+  }
+}
+
 
 trait Pipeline {
   def pipeline(f: RedisCommand with Pipeline => Any): Either[Exception, List[Either[Exception, Any]]]
@@ -84,24 +131,18 @@ class RedisClient(override val host: String, override val port: Int)
   extends RedisCommand
   with SyncCommand
   with Pipeline
+  with Transactional
   with PubSub {
 
   connect
 
   override def toString = host + ":" + String.valueOf(port)
 
-  def multi(f: MultiClient => Any): Option[List[Any]] = {
-    send("MULTI")(asString) // flush reply stream
-    try {
-      val multiClient = new MultiClient(this)
-      f(multiClient)
-      send("EXEC")(asExec(multiClient.handlers))
-    } catch {
-      case e: RedisMultiExecException =>
-        send("DISCARD")(asString)
-        None
-    }
+  def transaction(f: RedisCommand => Any): Either[Exception, Option[List[Any]]] = {
+    val tx = new TransactionClient(this)
+    tx.transaction(f)
   }
+
 
   def pipeline(f: RedisCommand with Pipeline => Any): Either[Exception, List[Either[Exception, Any]]] = {
     val pipe = pipelineBuffer
@@ -115,7 +156,7 @@ class RedisClient(override val host: String, override val port: Int)
 
 
     ex match {
-      case Some(e : RedisConnectionException) => Left(e)
+      case Some(e: RedisConnectionException) => Left(e)
       case other =>
         try {
           pipe.flush()
@@ -128,17 +169,28 @@ class RedisClient(override val host: String, override val port: Int)
 
   private[redis] def pipelineBuffer = new PipelineBuffer(this)
 
-  class MultiClient(parent: RedisClient) extends RedisCommand {
+  class TransactionClient(parent: RedisClient) extends RedisCommand with RawTransactional with DefaultTransactional {
 
     import serialization.Parse
 
+    var handlers: List[() => Any] = Nil
 
-    var handlers: Vector[() => Any] = Vector.empty
+    def openTx() {parent.send("MULTI")(asString)}
 
+    def commit() = parent.send("EXEC")(asExec(handlers.reverse))
+
+    def rollback() {
+      try {
+        parent.send("DISCARD")(asString)
+      } catch {
+        case e: Exception =>
+          error("Error rolling back transaction", e)
+      }
+    }
 
     override def send[A](command: String, args: Seq[Any])(result: => A)(implicit format: Format): A = {
       write(Commands.multiBulk(command.getBytes("UTF-8") +: (args map (format.apply))))
-      handlers :+= (() => result)
+      handlers ::= (() => result)
       flush()
       receive(singleLineReply).map(Parse.parseDefault)
       null.asInstanceOf[A] // ugh... gotta find a better way
@@ -146,7 +198,7 @@ class RedisClient(override val host: String, override val port: Int)
 
     override def send[A](command: String)(result: => A): A = {
       write(Commands.multiBulk(List(command.getBytes("UTF-8"))))
-      handlers :+= (() => result)
+      handlers ::= (() => result)
       flush()
       receive(singleLineReply).map(Parse.parseDefault)
       null.asInstanceOf[A]
@@ -173,6 +225,8 @@ class RedisClient(override val host: String, override val port: Int)
     override def readCounted(count: Int) = parent.readCounted(count)
   }
 
+  private[redis] def transactioned: RedisCommand with RawTransactional = new TransactionClient(this)
+
 }
 
 class PipelineBuffer(parent: RedisClient) extends RedisCommand with Pipeline {
@@ -195,7 +249,7 @@ class PipelineBuffer(parent: RedisClient) extends RedisCommand with Pipeline {
   override def send[A](command: String, args: Seq[Any])(result: => A)(implicit format: Format): A = {
 
     write(Commands.multiBulk(command.getBytes("UTF-8") +: (args map (format.apply))))
-    handlers ::= (() => result    )
+    handlers ::= (() => result)
     handlersCount += 1
     if (handlersCount % 256 == 0)
       flush()

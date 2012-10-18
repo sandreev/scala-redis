@@ -90,4 +90,7 @@ trait Operations { self: Redis =>
   // auths with the server.
   def auth(secret: Any)(implicit format: Format): Boolean =
     send("AUTH", List(secret))(asBoolean)
+
+  def watch(keys: Any*)(implicit format: Format): Boolean =
+    send("WATCH", keys)(asBoolean)
 }

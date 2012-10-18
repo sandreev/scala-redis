@@ -9,6 +9,7 @@ import org.slf4j.LoggerFactory
 import com.redis.PipelineBuffer
 import java.util
 import collection.mutable.ListBuffer
+import annotation.tailrec
 
 /**
  * Consistent hashing distributes keys across multiple servers. But there are situations
@@ -66,6 +67,7 @@ object NoOpKeyTag extends KeyTag {
 abstract class RedisCluster(configManager: ConfigManager)
   extends ClusterRedisCommand
   with Pipeline
+  with Transactional
   with NodeManager
   with PubSub {
   val port = 0
@@ -143,22 +145,21 @@ abstract class RedisCluster(configManager: ConfigManager)
     }
   })
 
-  private[redis] def poolForKey(hr: HashRing[RedisClientPool],  key: Any)(implicit format: Format): RedisClientPool = {
+  private[redis] def poolForKey(hr: HashRing[RedisClientPool], key: Any)(implicit format: Format): RedisClientPool = {
     val bKey = format(key)
     hr.getNode(keyTag.flatMap(_.tag(bKey)).getOrElse(bKey))
   }
 
 
-
   def onAllConns[T](body: RedisClient => T) =
-    hr.cluster.values.map(_.withClient (body))
+    hr.cluster.values.map(_.withClient(body))
 
   def close() {
     hr.cluster.values.foreach(_.close)
   }
 
-  private def poolForKeys(hr: HashRing[RedisClientPool], keys: Any*) = {
-    require(!keys.isEmpty,"Cannot determine node for empty keys set")
+  private[cluster] def poolForKeys(hr: HashRing[RedisClientPool], keys: Any*) = {
+    require(!keys.isEmpty, "Cannot determine node for empty keys set")
     val nodes = keys.toList.map(poolForKey(hr, _))
     nodes.forall(_ eq nodes.head) match {
       case true => nodes.head // all nodes equal
@@ -185,7 +186,7 @@ abstract class RedisCluster(configManager: ConfigManager)
 
   /* Pipeline */
 
-  private class MultiNodePipeline(parent: RedisCluster) extends ClusterRedisCommand with NodeManager with PipelineSpecials with Pipeline{
+  private class MultiNodePipeline(parent: RedisCluster) extends ClusterRedisCommand with NodeManager with DelayedResultSpecials with Pipeline {
     val host = parent.host
     val port = parent.port
     val hr: HashRing[RedisClientPool] = parent.hr.ringRef.get()
@@ -224,7 +225,7 @@ abstract class RedisCluster(configManager: ConfigManager)
     }
 
     def flushAndGetResults(): List[Either[Exception, Any]] = {
-      borrowedClients.foreach{
+      borrowedClients.foreach {
         case (pool, PipelineEntry(_, pipe, _)) =>
           try {
             pipe.flush()
@@ -236,7 +237,7 @@ abstract class RedisCluster(configManager: ConfigManager)
 
       val arr = new Array[Either[Exception, Any]](this.operationIdx)
 
-      borrowedClients.foreach{
+      borrowedClients.foreach {
         case (pool, PipelineEntry(client, pipe, indexes)) =>
           var errorOccurred = false
           try {
@@ -248,7 +249,7 @@ abstract class RedisCluster(configManager: ConfigManager)
           } catch {
             case e: Exception =>
               val errReport = Left(e)
-              indexes.foreach{
+              indexes.foreach {
                 arr(_) = errReport
               }
               errorOccurred = true
@@ -279,8 +280,47 @@ abstract class RedisCluster(configManager: ConfigManager)
     }
 
     ex match {
-      case Some(e : RedisConnectionException) => Left(e)
+      case Some(e: RedisConnectionException) => Left(e)
       case _ => Right(pipe.flushAndGetResults())
     }
   }
+
+
+  override def stmLike[T](precondition: (RedisCommand) => (Boolean,T))(action: (RedisCommand, T) => Any): Either[Exception, Option[List[Any]]] = {
+    def functionalPrecondition(r: RedisCommand): Either[Exception, (Boolean, T)] = try {
+      Right(precondition(r))
+    } catch {
+      case e: Exception =>
+      Left(e)
+    }
+
+    @tailrec
+    def checkAndAct: Either[Exception, Option[List[Any]]] = {
+      val tx = new SingleNodeConstraint(this)
+      functionalPrecondition(tx) match {
+        case Right((true, v)) =>
+          tx.transaction(action(_,v)) match {
+            case Right(None) =>
+              tx.close(None)
+              checkAndAct
+            case v@Right(Some(_)) =>
+              tx.close(None)
+              v
+            case ex@Left(e) =>
+              tx.close(Some(e))
+              ex
+          }
+        case Right((false, _)) =>
+          tx.close(None)
+          Right(None)
+        case Left(e) =>
+          tx.close(Some(e))
+          Left(e)
+      }
+    }
+
+    checkAndAct
+  }
+
+  def transaction(f: RedisCommand => Any): Either[Exception, Option[List[Any]]] =  new SingleNodeConstraint(this).transaction(f)
 }
