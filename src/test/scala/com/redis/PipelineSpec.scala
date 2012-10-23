@@ -6,7 +6,6 @@ import org.scalatest.BeforeAndAfterAll
 import org.scalatest.matchers.ShouldMatchers
 import org.scalatest.junit.JUnitRunner
 import org.junit.runner.RunWith
-import scala.Either.RightProjection
 
 
 @RunWith(classOf[JUnitRunner])
@@ -28,7 +27,6 @@ with BeforeAndAfterAll {
     r.disconnect
   }
 
-  def results(v: Any*) = v.map(Success(_)).toList
 
   describe("pipeline1") {
     it("should do pipelined commands") {

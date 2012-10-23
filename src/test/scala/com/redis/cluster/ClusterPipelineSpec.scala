@@ -5,7 +5,7 @@ import org.scalatest.junit.JUnitRunner
 import org.scalatest.{BeforeAndAfterAll, BeforeAndAfterEach, Spec}
 import org.scalatest.matchers.ShouldMatchers
 import org.scalatest.mock.MockitoSugar
-import com.redis.{RedisClient, RedisConnectionException, Success}
+import com.redis.{RedisClient, RedisConnectionException}
 
 @RunWith(classOf[JUnitRunner])
 class ClusterPipelineSpec extends Spec
@@ -36,8 +36,6 @@ with MockitoSugar {
   override def afterEach = r.flushdb
 
   override def afterAll = r.close
-
-  def results(v: Any*) = v.map(Success(_)).toList
 
   describe("pipeline1") {
     it("should do pipelined commands") {
