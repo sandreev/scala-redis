@@ -150,7 +150,7 @@ trait ClusterRedisCommand extends RedisCommand with ProhibitedDirectInteraction 
    */
   override def lpush(key: Any, value: Any, values: Any*)(implicit format: Format) = withNode(key)(_.lpush(key, value, values: _*))
 
-  override def rpush(key: Any, value: Any, values: Any*)(implicit format: Format) = withNode(key)(_.lpush(key, value, values: _*))
+  override def rpush(key: Any, value: Any, values: Any*)(implicit format: Format) = withNode(key)(_.rpush(key, value, values: _*))
 
   override def llen(key: Any)(implicit format: Format) = withNode(key)(_.llen(key))
 
@@ -235,7 +235,7 @@ trait ClusterRedisCommand extends RedisCommand with ProhibitedDirectInteraction 
     withNode(key)(_.zadd(key, score, member, scoreVals: _*))
 
   override def zrem(key: Any, member: Any, members: Any*)(implicit format: Format): Option[Int] =
-    withNode(key)(_.zrem(key, member, members))
+    withNode(key)(_.zrem(key, member, members: _*))
 
   override def zincrby(key: Any, incr: Double, member: Any)(implicit format: Format) = withNode(key)(_.zincrby(key, incr, member))
 
