@@ -151,8 +151,8 @@ abstract class RedisCluster(configManager: ConfigManager)
   }
 
 
-  def onAllConns[T](body: RedisClient => T) =
-    hr.cluster.values.map(_.withClient(body))
+  def onAllConns[T, R](body: RedisClient => T)(merge: Iterable[T] => R) =
+    Some(merge(hr.cluster.values.map(_.withClient(body))))
 
   def close() {
     hr.cluster.values.foreach(_.close)
@@ -175,39 +175,61 @@ abstract class RedisCluster(configManager: ConfigManager)
   def withNode[T](key: Any)(body: (RedisCommand) => T)(implicit format: Format): T =
     poolForKeys(hr.ringRef.get, key).withClient(body)
 
-  def groupByNodes[T](key: Any, keys: Any*)(body: (RedisCommand, Seq[Any]) => T)(implicit format: Format) = {
+  def groupByNodes[T, R](key: Any, keys: Any*)(body: (RedisCommand, Seq[Any]) => T)(merge: Iterable[(Seq[Any], T)] => R)(implicit format: Format) = {
     val ring = hr.ringRef.get
     val keyList = key :: keys.toList
-    keyList.groupBy(key => ring.getNode(keyTag.flatMap(_.tag(format(key))).getOrElse(format(key)))).toSeq.map {
+    Some(merge(keyList.groupBy(key => ring.getNode(keyTag.flatMap(_.tag(format(key))).getOrElse(format(key)))).toSeq.map {
       case (pool, keys) =>
-        pool.withClient(body(_, keys))
-    }
+        (keys, pool.withClient(body(_, keys)))
+    }))
   }
 
   /* Pipeline */
 
-  private class MultiNodePipeline(parent: RedisCluster) extends ClusterRedisCommand with NodeManager with DelayedResultSpecials with Pipeline {
+  private class MultiNodePipeline(parent: RedisCluster) extends ClusterRedisCommand with NodeManager with Pipeline {
     val host = parent.host
     val port = parent.port
     val hr: HashRing[RedisClientPool] = parent.hr.ringRef.get()
 
-    case class PipelineEntry(client: RedisClient, pipeline: PipelineBuffer, opIdxs: ListBuffer[Int])
+    case class PipelineEntry(client: RedisClient, pipeline: PipelineBuffer, opIdxs: ListBuffer[(Int, Seq[Any])])
 
     val borrowedClients = collection.JavaConversions.mapAsScalaMap(new util.IdentityHashMap[RedisClientPool, PipelineEntry])
+    val mergers = collection.mutable.Map.empty[Int, Function[Iterable[(Seq[Any], Any)], Any]]
     var operationIdx = 0
 
     private def pipelineNode(keys: Any*): RedisCommand = {
+      val res = pipelineNode(operationIdx, keys: _*)
+      operationIdx += 1
+      res
+    }
+
+    private def pipelineNode(idx: Int, keys: Any*): RedisCommand = {
       val pool = parent.poolForKeys(hr, keys: _*)
       borrowedClients.get(pool) match {
         case Some(PipelineEntry(_, pipe, ops)) =>
-          ops += operationIdx
-          operationIdx += 1
+          /*ops.lastOption match {
+            case Some((i, _)) if idx != i =>
+              ops += ((idx, keys))
+            case Some((i, prevKeys)) =>
+              val pos = ops.size - 1
+              ops(pos) = (idx, prevKeys ++ keys)
+            case None =>
+              ops += ((idx, keys))
+          } */
+          ops.headOption match {
+            case Some((i, _)) if idx != i =>
+              ((idx, keys)) +=: ops
+            case Some((i, prevKeys)) =>
+              ops(0) = (idx, prevKeys ++ keys)
+            case None =>
+               ((idx, keys)) +=: ops
+          }
           pipe
         case None =>
-          val client = pool.pool.borrowObject().asInstanceOf[RedisClient]
+          val client = pool.pool.borrowObject()
           val pipeline = client.pipelineBuffer
-          borrowedClients += (pool -> PipelineEntry(client, pipeline, ListBuffer.empty[Int]))
-          pipelineNode(keys: _*)
+          borrowedClients += (pool -> PipelineEntry(client, pipeline, ListBuffer.empty[(Int, Seq[Any])]))
+          pipelineNode(idx, keys: _*)
       }
     }
 
@@ -217,11 +239,19 @@ abstract class RedisCluster(configManager: ConfigManager)
     def withNode[T](key: Any)(body: (RedisCommand) => T)(implicit format: Format) =
       body(pipelineNode(key))
 
-    def onAllConns[T](body: (RedisClient) => T) = throw new UnsupportedOperationException("Unsupported for cluster pipelineNode")
+    def onAllConns[T, R](body: (RedisClient) => T)(merge: Iterable[T] => R) = throw new UnsupportedOperationException("Unsupported for cluster pipelineNode")
 
-    def groupByNodes[T](key: Any, keys: Any*)(body: (RedisCommand, Seq[Any]) => T)(implicit format: Format) = {
+    def groupByNodes[T, R](key: Any, keys: Any*)(body: (RedisCommand, Seq[Any]) => T)(merge: Iterable[(Seq[Any], T)] => R)(implicit format: Format) = {
       val keyList = key :: keys.toList
-      List(inSameNode(keyList: _*)(body(_, keyList)))
+
+      /*List(inSameNode(keyList: _*)(body(_, keyList)))*/
+      keyList.groupBy(key => pipelineNode(operationIdx, key)).toSeq.foreach {
+        case (pipe, keys) =>
+          body(pipe, keys)
+      }
+      mergers += operationIdx -> merge.asInstanceOf[Function[Iterable[(Seq[Any], Any)], Any]]
+      operationIdx += 1
+      None
     }
 
     def flushAndGetResults(): List[Either[Exception, Any]] = {
@@ -230,27 +260,34 @@ abstract class RedisCluster(configManager: ConfigManager)
           try {
             pipe.flush()
           } catch {
-            case e => log.error("Error flushing pipe in node " + pool, e)
+            case e: Exception => log.error("Error flushing pipe in node " + pool, e)
           }
       }
 
 
-      val arr = new Array[Either[Exception, Any]](this.operationIdx)
+      //val arr = new Array[List[Either[Exception, Any]]](this.operationIdx)
+      //val arr = Array.fill(this.operationIdx)(List.empty[Either[Exception, Any]])
+      val arr = collection.mutable.Map.empty[Int, List[(Seq[Any], Either[Exception, Any])]].withDefaultValue(Nil)
 
       borrowedClients.foreach {
         case (pool, PipelineEntry(client, pipe, indexes)) =>
           var errorOccurred = false
           try {
-            val iter = indexes.iterator
+            val iter = indexes.reverseIterator
             pipe.readResults().foreach {
-              arr(iter.next()) = _
+              v =>
+                val (idx, keys) = iter.next()
+                //arr(iter.next()) ::= _
+                arr += idx -> ((keys, v) :: arr(idx))
             }
 
           } catch {
             case e: Exception =>
               val errReport = Left(e)
               indexes.foreach {
-                arr(_) = errReport
+                case (idx, keys) =>
+                //arr(_) ::= errReport
+                  arr += idx -> ((keys, errReport) :: arr(idx))
               }
               errorOccurred = true
           } finally {
@@ -260,7 +297,18 @@ abstract class RedisCluster(configManager: ConfigManager)
               pool.pool.returnObject(client)
           }
       }
-      arr.toList
+      arr.toList.sortBy(_._1).map {
+        case (idx, keysAndResults) if mergers.contains(idx) & keysAndResults.forall(_._2.isRight) =>
+          try {
+            Right(mergers(idx)(keysAndResults.map(arg => (arg._1, arg._2.right.get))))
+          } catch {
+            case e: Exception => Left(e)
+          }
+        case (idx, keysAndResults) if keysAndResults.find(_._2.isLeft).isDefined =>
+          keysAndResults.find(_._2.isLeft).get._2
+        case (_, v :: Nil) => v._2
+        case _ => throw new IllegalArgumentException("list of results without merger")
+      }.toList
     }
 
     def pipeline(f: (RedisCommand with Pipeline) => Any) = {
@@ -281,17 +329,18 @@ abstract class RedisCluster(configManager: ConfigManager)
 
     ex match {
       case Some(e: RedisConnectionException) => Left(e)
-      case _ => Right(pipe.flushAndGetResults())
+      case Some(e) => Right(pipe.flushAndGetResults() ::: List(Left(e)))
+      case None => Right(pipe.flushAndGetResults())
     }
   }
 
 
-  override def stmLike[T](precondition: (RedisCommand) => (Boolean,T))(action: (RedisCommand, T) => Any): Either[Exception, Option[List[Any]]] = {
+  override def stmLike[T](precondition: (RedisCommand) => (Boolean, T))(action: (RedisCommand, T) => Any): Either[Exception, Option[List[Any]]] = {
     def functionalPrecondition(r: RedisCommand): Either[Exception, (Boolean, T)] = try {
       Right(precondition(r))
     } catch {
       case e: Exception =>
-      Left(e)
+        Left(e)
     }
 
     @tailrec
@@ -299,7 +348,7 @@ abstract class RedisCluster(configManager: ConfigManager)
       val tx = new SingleNodeConstraint(this)
       functionalPrecondition(tx) match {
         case Right((true, v)) =>
-          tx.transaction(action(_,v)) match {
+          tx.transaction(action(_, v)) match {
             case Right(None) =>
               tx.close(None)
               checkAndAct
@@ -322,5 +371,5 @@ abstract class RedisCluster(configManager: ConfigManager)
     checkAndAct
   }
 
-  def transaction(f: RedisCommand => Any): Either[Exception, Option[List[Any]]] =  new SingleNodeConstraint(this).transaction(f)
+  def transaction(f: RedisCommand => Any): Either[Exception, Option[List[Any]]] = new SingleNodeConstraint(this).transaction(f)
 }

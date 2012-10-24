@@ -34,6 +34,8 @@ with MockitoSugar {
 
   override def afterEach = r.flushdb
 
+  override def beforeAll = r.flushdb
+
   override def afterAll = r.close
 
   def successResults(list: Any*) = Right(list.map(Right(_)).toList)
@@ -65,7 +67,7 @@ with MockitoSugar {
       r.pipeline {
         r =>
           r.hincrby("hash3", "field1", 1)
-          r.hget("hash3", "field1") should be(Some("1"))
+          r.hget("hash3", "field1")
       } should be(Right(List(Right(Some(1)), Right(Some("1")))))
     }
 
@@ -105,7 +107,7 @@ with MockitoSugar {
       r.pipeline {
         r =>
           r.hmset("hash6", Map("field1" -> "val1", "field2" -> "val2"))
-          r.hlen("hash6") should be(Some(2))
+          r.hlen("hash6")
       } should be(successResults(
         true,
         Some(2)

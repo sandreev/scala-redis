@@ -23,9 +23,15 @@ with BeforeAndAfterAll {
     r.flushdb
   }
 
+  override protected def beforeAll() {
+    r.flushdb
+  }
+
   override def afterAll = {
     r.disconnect
   }
+
+
 
 
   describe("pipeline1") {
@@ -125,5 +131,6 @@ with BeforeAndAfterAll {
 
     }
   }
+
 
 }

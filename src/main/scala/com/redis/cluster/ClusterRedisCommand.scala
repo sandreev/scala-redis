@@ -9,32 +9,29 @@ trait ClusterRedisCommand extends RedisCommand with ProhibitedDirectInteraction 
    * Operations
    */
   override def keys[A](pattern: Any = "*")(implicit format: Format, parse: Parse[A]) =
-    Some[List[Option[A]]](
-      onAllConns(_.keys[A](pattern)).flatten.flatten.toList
-    )
+    onAllConns(_.keys[A](pattern))(r => r.flatten.flatten.toList)
 
-  override def flushdb = onAllConns(_.flushdb) forall (_ == true)
 
-  override def flushall = onAllConns(_.flushall) forall (_ == true)
+  override def flushdb = onAllConns(r => Some(r.flushdb))(_.forall(_ == Some(true))).getOrElse(false)
 
-  override def quit = onAllConns(_.quit) forall (_ == true)
+  override def flushall = onAllConns(r => Some(r.flushall))(_.forall(_ == Some(true))).getOrElse(false)
+
+  override def quit = onAllConns(r => Some(r.quit))(_.forall(_ == Some(true))).getOrElse(false)
 
   override def rename(oldkey: Any, newkey: Any)(implicit format: Format): Boolean = inSameNode(oldkey, newkey)(_.rename(oldkey, newkey))
 
-  override def renamenx(oldkey: Any, newkey: Any)(implicit format: Format): Boolean = withNode(oldkey)(_.renamenx(oldkey, newkey))
+  override def renamenx(oldkey: Any, newkey: Any)(implicit format: Format): Boolean = inSameNode(oldkey, newkey)(_.renamenx(oldkey, newkey))
 
   override def dbsize: Option[Int] =
-    Some(onAllConns(_.dbsize).foldLeft(0)((a, b) => b.map(a +).getOrElse(a)))
+    onAllConns(_.dbsize)(r => r.foldLeft(0)((a, b) => b.map(a +).getOrElse(a)))
 
   override def exists(key: Any)(implicit format: Format): Boolean = withNode(key)(_.exists(key))
 
   override def del(key: Any, keys: Any*)(implicit format: Format): Option[Int] =
-    Some(
-      groupByNodes(key, keys: _*) {
-        (client: RedisCommand, keys: Seq[Any]) =>
-          client.del(keys.head, keys.tail: _*)
-      }.flatten.sum
-    )
+    groupByNodes(key, keys: _*) {
+      (client: RedisCommand, keys: Seq[Any]) =>
+        client.del(keys.head, keys.tail: _*)
+    }(r => Some(r.map(_._2).flatten.sum)).getOrElse(None)
 
 
   override def getType(key: Any)(implicit format: Format) = withNode(key)(_.getType(key))
@@ -48,13 +45,13 @@ trait ClusterRedisCommand extends RedisCommand with ProhibitedDirectInteraction 
   /**
    * NodeOperations
    */
-  override def save = onAllConns(_.save) forall (_ == true)
+  override def save = onAllConns(_.save)(_.forall(_ == true)).getOrElse(false)
 
-  override def bgsave = onAllConns(_.bgsave) forall (_ == true)
+  override def bgsave = onAllConns(_.bgsave)(_.forall(_ == true)).getOrElse(false)
 
-  override def shutdown = onAllConns(_.shutdown) forall (_ == true)
+  override def shutdown = onAllConns(_.shutdown)(_.forall(_ == true)).getOrElse(false)
 
-  override def bgrewriteaof = onAllConns(_.bgrewriteaof) forall (_ == true)
+  override def bgrewriteaof = onAllConns(_.bgrewriteaof)(_.forall(_ == true)).getOrElse(false)
 
   override def lastsave = throw new UnsupportedOperationException("not supported on a cluster")
 
@@ -90,21 +87,63 @@ trait ClusterRedisCommand extends RedisCommand with ProhibitedDirectInteraction 
 
   override def mget[A](key: Any, keys: Any*)(implicit format: Format, parse: Parse[A]): Option[List[Option[A]]] = {
     val keyList = key :: keys.toList
-    val kvs = groupByNodes(key, keys: _*) {
+    groupByNodes(key, keys: _*) {
       (client: RedisCommand, keys: Seq[Any]) =>
-        client.mget(keys.head, keys.tail: _*).map(keys.zip(_)).getOrElse(List.empty[(Any, Option[A])])
-    }.flatten.toMap
-    Some(keyList.map(kvs).toList)
-
+        client.mget(keys.head, keys.tail: _*)
+    } {
+      results =>
+        val resMap = results.flatMap {
+          case (keys, Some(list)) =>
+            keys.zip(list)
+          case (keys, None) =>
+            keys.map(k => (k, None))
+        }.toMap
+        Some(keyList.map(resMap).toList)
+    }.getOrElse(None)
   }
 
-  override def mset(kvs: (Any, Any)*)(implicit format: Format) = kvs.toList.map {
-    case (k, v) => set(k, v)
-  }.forall(_ == true)
+  override def mset(kvs: (Any, Any)*)(implicit format: Format) = {
+    require(!kvs.isEmpty, "Cannot process with empty list of key-value pairs")
+    val keyList = kvs.map(_._1).toList
+    val kvsMap = kvs.toMap
+    groupByNodes(keyList.head, keyList.tail: _*)((r, keys) => r.mset(keys.map(k => (k, kvsMap(k))): _*))(_.forall(_._2 == true)).getOrElse(false)
+  }
 
-  override def msetnx(kvs: (Any, Any)*)(implicit format: Format) = kvs.toList.map {
-    case (k, v) => setnx(k, v)
-  }.forall(_ == true)
+  override def msetnx(kvs: (Any, Any)*)(implicit format: Format) = {
+    require(!kvs.isEmpty, "Cannot process with empty list of key-value pairs")
+    val keyList = kvs.map(_._1).toList
+    val kvsMap = kvs.toMap
+    groupByNodes(keyList.head, keyList.tail: _*)((r, keys) => r.msetnx(keys.map(k => (k, kvsMap(k))): _*))(_.forall(_._2 == true)).getOrElse(false)
+  }
+
+  override def setex(key: Any, expiry: Int, value: Any)(implicit format: Format) =
+    withNode(key)(_.setex(key, expiry, value))
+
+  // SETRANGE key offset value
+  override def setrange(key: Any, offset: Int, value: Any)(implicit format: Format) =
+    withNode(key)(_.setrange(key, offset, value))
+
+  // GETRANGE key start end
+  override def getrange[A](key: Any, start: Int, end: Int)(implicit format: Format, parse: Parse[A]) =
+    withNode(key)(_.getrange(key, start, end))
+
+  // STRLEN key
+  override def strlen(key: Any)(implicit format: Format) =
+    withNode(key)(_.strlen(key))
+
+  // APPEND KEY (key, value)
+  override def append(key: Any, value: Any)(implicit format: Format) =
+    withNode(key)(_.append(key, value))
+
+
+  // SETBIT key offset value
+  override def setbit(key: Any, offset: Int, value: Any)(implicit format: Format) =
+    withNode(key)(_.setbit(key, offset, value))
+
+
+  // GETBIT key offset
+  override def getbit(key: Any, offset: Int)(implicit format: Format) =
+    withNode(key)(_.getbit(key, offset))
 
   /**
    * ListOperations
@@ -218,11 +257,11 @@ trait ClusterRedisCommand extends RedisCommand with ProhibitedDirectInteraction 
 
 
   override def zrangebyscoreWithScore[A](key: Any, min: Double, minInclusive: Boolean, max: Double, maxInclusive: Boolean, limit: Option[(Int, Int)])(implicit format: Format, parse: Parse[A]): Option[List[(A, Double)]] =
-    withNode(key)(_.zrangebyscoreWithScore(key,min,minInclusive,max,maxInclusive,limit))
+    withNode(key)(_.zrangebyscoreWithScore(key, min, minInclusive, max, maxInclusive, limit))
 
   // ZRANK
   override def zrank(key: Any, member: Any, reverse: Boolean)(implicit format: Format): Option[Int] =
-    withNode(key)(_.zrank(key,member, reverse))
+    withNode(key)(_.zrank(key, member, reverse))
 
   // ZREMRANGEBYRANK
   override def zremrangebyrank(key: Any, start: Int, end: Int)(implicit format: Format) =
@@ -230,7 +269,7 @@ trait ClusterRedisCommand extends RedisCommand with ProhibitedDirectInteraction 
 
   // ZREMRANGEBYSCORE
   override def zremrangebyscore(key: Any, start: Double, end: Double)(implicit format: Format) =
-    withNode(key)(_.zremrangebyscore(key,start,end))
+    withNode(key)(_.zremrangebyscore(key, start, end))
 
   // ZUNION
   override def zunionstore(dstKey: Any, keys: Iterable[Any], aggregate: Aggregate)(implicit format: Format) =

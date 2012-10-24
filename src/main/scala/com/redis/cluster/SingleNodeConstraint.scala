@@ -1,7 +1,8 @@
 package com.redis.cluster
 
-import com.redis._
+
 import com.redis.serialization.Format
+import com.redis._
 import scala.Some
 
 private[cluster] class SingleNodeConstraint(parent: RedisCluster) extends ClusterRedisCommand with NodeManager with Transactional {
@@ -34,12 +35,12 @@ private[cluster] class SingleNodeConstraint(parent: RedisCluster) extends Cluste
   def withNode[T](key: Any)(body: (RedisCommand) => T)(implicit format: Format) =
     body(multiClient(key))
 
-  def onAllConns[T](body: (RedisClient) => T) = throw new UnsupportedOperationException("Multinode transactions not supported")
+  def onAllConns[T,R](body: (RedisClient) => T)(merge: Iterable[T] => R) = throw new UnsupportedOperationException("Multinode transactions not supported")
 
-  def groupByNodes[T](key: Any, keys: Any*)(body: (RedisCommand, Seq[Any]) => T)(implicit format: Format) = {
+  def groupByNodes[T,R](key: Any, keys: Any*)(body: (RedisCommand, Seq[Any]) => T)(merge: Iterable[(Seq[Any], T)] => R)(implicit format: Format) = {
     val allKeys = key :: keys.toList
     val client = multiClient(allKeys: _*)
-    body(client, allKeys) :: Nil
+    Some(merge((allKeys, body(client, allKeys)) :: Nil))
   }
 
   def transaction(f: RedisCommand => Any): Either[Exception, Option[List[Any]]] = (new Transaction).transaction(f)
@@ -77,12 +78,12 @@ private[cluster] class SingleNodeConstraint(parent: RedisCluster) extends Cluste
     def withNode[T](key: Any)(body: (RedisCommand) => T)(implicit format: Format) =
       body(driver(key))
 
-    def onAllConns[T](body: (RedisClient) => T) = SingleNodeConstraint.this.onAllConns(body)
+    def onAllConns[T, R](body: (RedisClient) => T)(merge: Iterable[T] => R) = SingleNodeConstraint.this.onAllConns(body)(merge)
 
-    def groupByNodes[T](key: Any, keys: Any*)(body: (RedisCommand, Seq[Any]) => T)(implicit format: Format) = {
+    def groupByNodes[T,R](key: Any, keys: Any*)(body: (RedisCommand, Seq[Any]) => T)(merge: Iterable[(Seq[Any], T)] => R)(implicit format: Format) = {
       val allKeys = key :: keys.toList
       val client = driver(allKeys: _*)
-      body(client, allKeys) :: Nil
+      Some(merge((allKeys, body(client, allKeys)) :: Nil))
     }
   }
 

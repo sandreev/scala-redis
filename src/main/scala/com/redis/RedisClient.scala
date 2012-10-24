@@ -157,10 +157,17 @@ class RedisClient(override val host: String, override val port: Int)
 
     ex match {
       case Some(e: RedisConnectionException) => Left(e)
-      case other =>
+      case Some(e) =>
         try {
           pipe.flush()
-          Right(pipe.readResults() ::: (other.toList.map(Left(_))))
+          Right(pipe.readResults() ::: List(Left(e)))
+        } catch {
+          case e: Exception => Left(e)
+        }
+      case None =>
+        try {
+          pipe.flush()
+          Right(pipe.readResults())
         } catch {
           case e: Exception => Left(e)
         }

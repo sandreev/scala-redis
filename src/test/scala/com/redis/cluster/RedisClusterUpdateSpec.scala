@@ -41,7 +41,7 @@ class RedisClusterUpdateSpec extends WordSpec with ShouldMatchers with BeforeAnd
       Thread.sleep(3000)
 
       var clients = Set.empty[String]
-      cluster.onAllConns( clients += _.toString )
+      cluster.onAllConns( clients += _.toString )(r => r)
 
       clients should be(Set("localhost:6379", "localhost:6380", "localhost:6382"))
     }

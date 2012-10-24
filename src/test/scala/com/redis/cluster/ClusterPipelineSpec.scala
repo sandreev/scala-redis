@@ -79,13 +79,14 @@ with MockitoSugar {
 
   describe("pipeline4") {
     it("should execute commands before non-connection exception ") {
+      val ex = new Exception("want to discard")
       val res = r.pipeline {
         p =>
           p.set("a", "abc")
-          throw new Exception("want to discard")
+          throw ex
       }
 
-      res.right.get should equal(List(Right(true)))
+      res.right.get should equal(List(Right(true), Left(ex)))
       res.left.toOption.isEmpty should equal(true)
 
       r.get("a") should equal(Some("abc"))
