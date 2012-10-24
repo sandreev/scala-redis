@@ -146,6 +146,18 @@ class SortedSetOperationsSpec extends Spec
     }
   }
 
+  describe("zincrby") {
+    it ("should return the number of elements between min and max") {
+      add
+      zincrby("hackers", 10, "yukihiro matsumoto") should equal(Some(1975))
+      zincrby("hackers", 10, "richard stallman") should equal(Some(1963))
+      zincrby("hackers", 10, "claude shannon") should equal(Some(1926))
+      zincrby("hackers", 10, "linus torvalds") should equal(Some(1979))
+      zincrby("hackers", 10, "alan kay") should equal(Some(1950))
+      zincrby("hackers", 10, "alan turing") should equal(Some(1922))
+    }
+  }
+
   describe("zrangebyscore") {
     it ("should return the elements between min and max") {
       add
