@@ -207,15 +207,6 @@ abstract class RedisCluster(configManager: ConfigManager)
       val pool = parent.poolForKeys(hr, keys: _*)
       borrowedClients.get(pool) match {
         case Some(PipelineEntry(_, pipe, ops)) =>
-          /*ops.lastOption match {
-            case Some((i, _)) if idx != i =>
-              ops += ((idx, keys))
-            case Some((i, prevKeys)) =>
-              val pos = ops.size - 1
-              ops(pos) = (idx, prevKeys ++ keys)
-            case None =>
-              ops += ((idx, keys))
-          } */
           ops.headOption match {
             case Some((i, _)) if idx != i =>
               ((idx, keys)) +=: ops

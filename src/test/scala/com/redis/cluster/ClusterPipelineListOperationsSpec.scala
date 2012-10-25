@@ -421,7 +421,7 @@ with MockitoSugar {
 
   describe("brpoplpush") {
     it("should throw UnsupportedOperationException") {
-      r.pipeline {
+      val res = r.pipeline {
         p =>
           p.rpush("list-1", "a")
           p.rpush("list-1", "b")
@@ -433,8 +433,11 @@ with MockitoSugar {
           p.lindex("list-2", 0)
           p.llen("list-1")
           p.llen("list-2")
-      }.right.get should equal(List(Right(Some(1)), Right(Some(2)), Right(Some(3)),
-        Right(Some(1)), Right(Some(2))))
+      }/*.right.get should equal(List(Right(Some(1)), Right(Some(2)), Right(Some(3)),
+        Right(Some(1)), Right(Some(2))))*/
+      val successes = res.right.get.reverse.tail.reverse
+      successes should be(List(Right(Some(1)), Right(Some(2)), Right(Some(3)),    Right(Some(1)), Right(Some(2))))
+      res.right.get.last.isLeft should be(true)
 
     }
   }
@@ -454,7 +457,7 @@ with MockitoSugar {
         r.pipeline {
           p =>
             r.blpop(3, "l1", "l2")
-        }.right.get should equal(List())
+        }.right.get.head.isLeft should equal(true)
       }
     }
 }
