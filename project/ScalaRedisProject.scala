@@ -15,7 +15,7 @@ object ScalaRedisProject extends Build
  
   lazy val twitterRepo = "twitter.com" at "http://maven.twttr.com/"
 
-  lazy val coreSettings = commonSettings ++ template ++ Seq(
+  lazy val coreSettings = commonSettings ++ Seq(
     name := "RedisClient",
 
     libraryDependencies ++= Seq("commons-pool" % "commons-pool" % "1.5.6",
@@ -61,31 +61,4 @@ object ScalaRedisProject extends Build
       </developers>),
     unmanagedResources in Compile <+= baseDirectory map { _ / "LICENSE" }
   ) ++ sbtassembly.Plugin.assemblySettings ++ Seq(test in assembly := {})
-
-  lazy val fmpp = TaskKey[Seq[File]]("fmpp")
-  lazy val fmppOptions = SettingKey[Seq[String]]("fmpp-options")
-  lazy val fmppConfig = config("fmpp") hide
-
-  lazy val template = fmppConfig(Test) ++ fmppConfig(Compile) ++ templateBase
-  lazy val templateBase = Seq(
-    libraryDependencies += "net.sourceforge.fmpp" % "fmpp" % "0.9.14" % fmppConfig.name,
-    ivyConfigurations += fmppConfig,
-    fmppOptions := "--ignore-temporary-files" :: Nil,
-    fullClasspath in fmppConfig <<= update map { _ select configurationFilter(fmppConfig.name) map Attributed.blank }
-  )
-
-  def fmppConfig(c: Configuration): Seq[Setting[_]] = inConfig(c)(Seq(
-    sourceGenerators <+= fmpp,
-    fmpp <<= fmppTask,
-    mappings in packageSrc <<= (managedSources, sourceManaged) map { (srcs, base) => srcs x relativeTo(base) },
-    sources <<= managedSources
-  ))
-
-  lazy val fmppTask =
-    (fullClasspath in fmppConfig, runner in fmpp, unmanagedSources, sourceDirectory, includeFilter in unmanagedSources, sourceManaged, fmppOptions, streams) map { (cp, r, sources, srcRoot, filter, output, args, s) =>
-      IO.delete(output)
-      val arguments = "-U" +: "all" +: "-S" +: srcRoot.getAbsolutePath +: "-O" +: output.getAbsolutePath +: (args ++ sources.getPaths)
-      toError(r.run("fmpp.tools.CommandLine", cp.files, arguments, s.log))
-      (output ** filter).get
-  }
 }
