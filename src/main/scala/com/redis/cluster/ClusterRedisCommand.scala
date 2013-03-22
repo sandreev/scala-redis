@@ -31,7 +31,9 @@ trait ClusterRedisCommand extends RedisCommand with ProhibitedDirectInteraction 
     groupByNodes(key, keys: _*) {
       (client: RedisCommand, keys: Seq[Any]) =>
         client.del(keys.head, keys.tail: _*)
-    }(r => Some(r.map(_._2).flatten.sum)).getOrElse(None)
+    } { r =>
+      Some(r.map(e => if(e._2 == null) None else e._2).flatten.sum)
+    }.getOrElse(None)
 
 
   override def getType(key: Any)(implicit format: Format) = withNode(key)(_.getType(key))
@@ -314,4 +316,6 @@ trait ClusterRedisCommand extends RedisCommand with ProhibitedDirectInteraction 
   override def hsetnx(key: Any, field: Any, value: Any)(implicit format: Format): Boolean = withNode(key)(_.hsetnx(key, field, value))
 
   override def watch(keys: Any*)(implicit format: Format): Boolean = inSameNode(keys: _*)(_.watch(keys: _*))
+
+
 }

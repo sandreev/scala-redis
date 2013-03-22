@@ -93,4 +93,7 @@ trait Operations { self: Redis =>
 
   def watch(keys: Any*)(implicit format: Format): Boolean =
     send("WATCH", keys)(asBoolean)
+
+  def unwatch: Boolean =
+    send("UNWATCH")(asBoolean)
 }

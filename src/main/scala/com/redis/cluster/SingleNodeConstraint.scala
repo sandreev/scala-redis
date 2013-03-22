@@ -87,6 +87,12 @@ private[cluster] class SingleNodeConstraint(parent: RedisCluster) extends Cluste
     }
   }
 
+
+  override def unwatch: Boolean = poolAndClient match {
+    case Some(p) => p.client.unwatch
+    case _ => throw new IllegalStateException("Called unwatch when the node is unknown")
+  }
+
   def close(err: Option[Exception]) {
     (poolAndClient, err) match {
       case (Some(p), Some(e)) => p.pool.pool.invalidateObject(p.client)
